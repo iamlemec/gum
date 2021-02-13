@@ -57,7 +57,7 @@ class Element:
         return f'{self.tag}: {attr}'
 
     def _repr_svg_(self):
-        return SVG(self, size=size_base).svg()
+        return SVG((self, (0.01, 0.01, 0.99, 0.99)), size=size_base).svg()
 
     def props(self, ctx):
         return self.attr
@@ -106,7 +106,8 @@ class SVG(Container):
 
     def props(self, ctx):
         w, h = self.size
-        return merge(self.attr, width=w, height=h)
+        base = dict(width=w, height=h)
+        return {**base, **self.attr}
 
     def svg(self):
         rect0 = (0, 0) + self.size
@@ -146,6 +147,7 @@ class SymPath(Element):
             yvals = eval(formula, {'x': xvals})
         else:
             yvals = formula(xvals)
+        yvals *= np.ones_like(xvals)
 
         self.xlim = xlim
         if ylim is None:
@@ -159,7 +161,7 @@ class SymPath(Element):
         yrange = ymax - ymin
 
         self.xnorm = (xvals-xmin)/xrange if xrange != 0 else 0.5*np.ones_like(xvals)
-        self.ynorm = (yvals-ymin)/yrange if yrange != 0 else 0.5*np.ones_like(yvals)
+        self.ynorm = (ymax-yvals)/yrange if yrange != 0 else 0.5*np.ones_like(yvals)
 
     def props(self, ctx):
         cx1, cy1, cx2, cy2 = ctx.rect
@@ -193,9 +195,9 @@ class Plot(Element):
         yrange = ymax - ymin
 
         x1s = [(x-xmin)/xrange if xrange != 0 else 0.5 for x in xmins]
-        y1s = [(y-ymin)/yrange if yrange != 0 else 0.5 for y in ymins]
+        y1s = [(ymax-y)/yrange if yrange != 0 else 0.5 for y in ymaxs]
         x2s = [(x-xmin)/xrange if xrange != 0 else 0.5 for x in xmaxs]
-        y2s = [(y-ymin)/yrange if yrange != 0 else 0.5 for y in ymaxs]
+        y2s = [(ymax-y)/yrange if yrange != 0 else 0.5 for y in ymins]
         rects = [r for r in zip(x1s, y1s, x2s, y2s)]
 
         return '\n'.join([c.svg(ctx.coords(r)) for c, r in zip(self.lines, rects)])
