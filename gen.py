@@ -87,10 +87,6 @@ class Container(Element):
                 (c if type(c) is tuple else (c, rect_base)) for c in children
             ]
 
-    def add(self, child, rect=rect_base):
-        self.children.append((child, rect))
-        return self
-
     def inner(self, ctx):
         return '\n'.join([c.svg(ctx.coords(r)) for c, r in self.children])
 
@@ -139,17 +135,42 @@ class Rect(Element):
         return {**base, **self.attr}
 
 class SymPath(Element):
-    def __init__(self, formula, xlim, ylim=None, N=100, *args, **kwargs):
-        super().__init__(tag='path', *args, **kwargs)
+    def __init__(self, fy=None, fx=None, xlim=None, ylim=None, tlim=None, N=100, *args, **kwargs):
+        super().__init__(tag='polyline', *args, **kwargs)
 
-        xvals = np.linspace(*xlim, N)
-        if type(formula) is str:
-            yvals = eval(formula, {'x': xvals})
+        if fx is not None and fy is not None:
+            tvals = np.linspace(*tlim, N)
+            if type(fx) is str:
+                xvals = eval(fx, {'t': tvals})
+            else:
+                xvals = fx(tvals)
+            if type(fy) is str:
+                yvals = eval(fy, {'t': tvals})
+            else:
+                yvals = fy(tvals)
+            xvals *= np.ones_like(tvals)
+            yvals *= np.ones_like(tvals)
+        elif fy is not None:
+            xvals = np.linspace(*xlim, N)
+            if type(fy) is str:
+                yvals = eval(formula, {'x': xvals})
+            else:
+                yvals = fy(xvals)
+            yvals *= np.ones_like(xvals)
+        elif fx is not None:
+            yvals = np.linspace(*ylim, N)
+            if type(fx) is str:
+                xvals = eval(formula, {'y': yvals})
+            else:
+                xvals = fx(yvals)
+            xvals *= np.ones_like(yvals)
         else:
-            yvals = formula(xvals)
-        yvals *= np.ones_like(xvals)
+            raise Exception('Must specify either fx or fy')
 
-        self.xlim = xlim
+        if xlim is None:
+            self.xlim = np.min(xvals), np.max(xvals)
+        else:
+            self.xlim = xlim
         if ylim is None:
             self.ylim = np.min(yvals), np.max(yvals)
         else:
@@ -170,21 +191,27 @@ class SymPath(Element):
         xcoord = cx1 + self.xnorm*cw
         ycoord = cy1 + self.ynorm*ch
 
-        path = (
-            f'M {xcoord[0]},{ycoord[0]}'
-            + ' '.join([f'L {x},{y}' for x, y in zip(xcoord[1:], ycoord[1:])])
-        )
-
-        base = dict(d=path, fill='none', stroke='black')
+        points = ' '.join([f'{x},{y}' for x, y in zip(xcoord, ycoord)])
+        base = dict(points=points, fill='none', stroke='black')
         return {**base, **self.attr}
+
+class Axis(Container):
+    def __init__(self, orient, **kwargs):
+        if orient in ('h', 'horizontal'):
+            rect = (0, 0.5, 1, 0.5)
+        elif orient in ('v', 'vertical'):
+            rect = (0.5, 0, 0.5, 1)
+
+        line = Line()
+        children = [(line, rect)]
+
+        super().__init__(children, **kwargs)
 
 class Plot(Element):
     def __init__(self, lines=None, **attr):
         super().__init__(tag='g', **attr)
         self.lines = lines if lines is not None else []
-
-    def add(self, line):
-        self.lines.append(line)
+        self.axes = [Axis('h'), Axis('v')]
 
     def inner(self, ctx):
         xmins, xmaxs = zip(*[c.xlim for c in self.lines])
@@ -200,4 +227,7 @@ class Plot(Element):
         y2s = [(ymax-y)/yrange if yrange != 0 else 0.5 for y in ymins]
         rects = [r for r in zip(x1s, y1s, x2s, y2s)]
 
-        return '\n'.join([c.svg(ctx.coords(r)) for c, r in zip(self.lines, rects)])
+        lines = '\n'.join([c.svg(ctx.coords(r)) for c, r in zip(self.lines, rects)])
+        axes = '\n'.join([a.svg(ctx.coords(rect_base)) for a in self.axes])
+
+        return lines + axes
