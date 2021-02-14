@@ -26,8 +26,8 @@ def merge(d1, **d2):
     return {**d1, **d2}
 
 def display(x, **kwargs):
-    if type(x) is not Diagram:
-        x = Diagram([x], **kwargs)
+    if type(x) is not SVG:
+        x = SVG([x], **kwargs)
     return x.svg()
 
 class Context:
@@ -35,11 +35,17 @@ class Context:
         for k, v in kwargs.items():
             setattr(self, k, v)
 
+    def __repr__(self):
+        return str(self.__dict__)
+
     def coords(self, rect):
         rect1 = map_coords(self.rect, rect)
         ctx = self.copy()
         ctx.rect = rect1
         return ctx
+
+    def clone(self, **kwargs):
+        return Context(**{**self.__dict__, **kwargs})
 
     def copy(self):
         return copy.copy(self)
@@ -75,7 +81,7 @@ class Element:
         pre = ' ' if len(props) > 0 else ''
         pad = '\n' if len(inner) > 0 else ''
 
-        return f'<{self.tag}{pre}{props}>{pad}{inner}{pad}</{self.tag}>'
+        return f'<{self.tag}{pre}{props}>{inner}</{self.tag}>'
 
 class Container(Element):
     def __init__(self, children=None, tag='g', **attr):
@@ -88,7 +94,7 @@ class Container(Element):
             ]
 
     def inner(self, ctx):
-        return '\n'.join([c.svg(ctx.coords(r)) for c, r in self.children])
+        return '\n' + '\n'.join([c.svg(ctx.coords(r)) for c, r in self.children]) + '\n'
 
 class SVG(Container):
     def __init__(self, children=None, size=size_base, **attr):
@@ -116,27 +122,94 @@ class SVG(Container):
             fid.write(s)
 
 class Line(Element):
-    def __init__(self, *args, **kwargs):
-        super().__init__(tag='line', *args, **kwargs)
-
-    def props(self, ctx):
-        x1, y1, x2, y2 = ctx.rect
-        base = dict(x1=x1, y1=y1, x2=x2, y2=y2, stroke='black')
-        return {**base, **self.attr}
-
-class Rect(Element):
-    def __init__(self, *args, **kwargs):
-        super().__init__(tag='rect', *args, **kwargs)
+    def __init__(self, x1=0, y1=0, x2=1, y2=1, **attr):
+        super().__init__(tag='line', **attr)
+        self.x1 = x1
+        self.y1 = y1
+        self.x2 = x2
+        self.y2 = y2
 
     def props(self, ctx):
         x1, y1, x2, y2 = ctx.rect
         w, h = x2 - x1, y2 - y1
-        base = dict(x=x1, y=y1, width=w, height=h, fill='none', stroke='black')
+
+        x1p = x1 + w*self.x1
+        y1p = y1 + h*self.y1
+        x2p = x1 + w*self.x2
+        y2p = y1 + h*self.y2
+
+        base = dict(x1=x1p, y1=y1p, x2=x2p, y2=y2p, stroke='black')
         return {**base, **self.attr}
 
+class Rect(Element):
+    def __init__(self, x=0, y=0, w=1, h=1, **attr):
+        super().__init__(tag='rect', **attr)
+        self.x = x
+        self.y = y
+        self.w = w
+        self.h = h
+
+    def props(self, ctx):
+        x1, y1, x2, y2 = ctx.rect
+        w0, h0 = x2 - x1, y2 - y1
+
+        x = x1 + w0*self.x
+        y = y1 + h0*self.y
+        w = w0*self.w
+        h = h0*self.h
+
+        base = dict(x=x, y=y, width=w, height=h, fill='none', stroke='black')
+        return {**base, **self.attr}
+
+class Ellipse(Element):
+    def __init__(self, cx=0.5, cy=0.5, rx=0.5, ry=0.5, **attr):
+        super().__init__(tag='ellipse', **attr)
+        self.cx = cx
+        self.cy = cy
+        self.rx = rx
+        self.ry = ry
+
+    def props(self, ctx):
+        x1, y1, x2, y2 = ctx.rect
+        w, h = x2 - x1, y2 - y1
+
+        cx = x1 + w*self.cx
+        cy = y1 + h*self.cy
+        rx = w*self.rx
+        ry = h*self.ry
+
+        base = dict(cx=cx, cy=cy, rx=rx, ry=ry, fill='none', stroke='black')
+        return {**base, **self.attr}
+
+class Circle(Ellipse):
+    def __init__(self, cx=0.5, cy=0.5, r=0.5, **attr):
+        super().__init__(cx, cy, r, r, **attr)
+
+class Text(Element):
+    def __init__(self, x=0, y=1, text='', font_size=0.05, **attr):
+        super().__init__(tag='text', **attr)
+        self.x = x
+        self.y = y
+        self.text = text
+        self.font_size = font_size
+
+    def props(self, ctx):
+        x1, y1, x2, y2 = ctx.rect
+        w, h = x2 - x1, y2 - y1
+
+        x = x1 + w*self.x
+        y = y1 + h*self.y
+        fs = h*self.font_size
+
+        base = dict(x=x, y=y, font_size=f'{fs}px', stroke='black')
+        return {**base, **self.attr}
+
+    def inner(self, ctx):
+        return self.text
+
 class SymPath(Element):
-    def __init__(self, fy=None, fx=None, xlim=None, ylim=None, tlim=None, N=100, *args, **kwargs):
-        super().__init__(tag='polyline', *args, **kwargs)
+    def __init__(self, fy=None, fx=None, xlim=None, ylim=None, tlim=None, N=100, **attr):
+        super().__init__(tag='polyline', **attr)
 
         if fx is not None and fy is not None:
             tvals = np.linspace(*tlim, N)
@@ -195,23 +268,42 @@ class SymPath(Element):
         base = dict(points=points, fill='none', stroke='black')
         return {**base, **self.attr}
 
-class Axis(Container):
-    def __init__(self, orient, **kwargs):
-        if orient in ('h', 'horizontal'):
-            rect = (0, 0.5, 1, 0.5)
-        elif orient in ('v', 'vertical'):
-            rect = (0.5, 0, 0.5, 1)
+class Axis(Element):
+    def __init__(self, orient, pos=0, **attr):
+        super().__init__(tag='line', **attr)
+        self.orient = orient
+        self.pos = pos
 
-        line = Line()
-        children = [(line, rect)]
+    def props(self, ctx):
+        x1, y1, x2, y2 = ctx.rect
+        w, h = x2 - x1, y2 - y1
 
-        super().__init__(children, **kwargs)
+        if self.orient in ('h', 'x'):
+            fy = (ctx.ymax-self.pos)/(ctx.ymax-ctx.ymin)
+            y = y1 + fy*h
+            y1p,  y2p = y, y
+            x1p, x2p = x1, x2
+        elif self.orient in ('v', 'y'):
+            fx = (self.pos-ctx.xmin)/(ctx.xmax-ctx.xmin)
+            x = x1 + fx*w
+            x1p, x2p = x, x
+            y1p, y2p = y1, y2
+
+        base = dict(x1=x1p, y1=y1p, x2=x2p, y2=y2p, stroke='black')
+        return {**base, **self.attr}
 
 class Plot(Element):
-    def __init__(self, lines=None, **attr):
+    def __init__(self, lines=None, xaxis=0, yaxis=0, padding=0.05, **attr):
         super().__init__(tag='g', **attr)
+
+        if xaxis is not None and not isinstance(xaxis, Element):
+            xaxis = Axis('x', xaxis)
+        if yaxis is not None and not isinstance(yaxis, Element):
+            yaxis = Axis('y', yaxis)
+
         self.lines = lines if lines is not None else []
-        self.axes = [Axis('h'), Axis('v')]
+        self.axes = [xaxis, yaxis]
+        self.padding = padding
 
     def inner(self, ctx):
         xmins, xmaxs = zip(*[c.xlim for c in self.lines])
@@ -227,7 +319,33 @@ class Plot(Element):
         y2s = [(ymax-y)/yrange if yrange != 0 else 0.5 for y in ymins]
         rects = [r for r in zip(x1s, y1s, x2s, y2s)]
 
-        lines = '\n'.join([c.svg(ctx.coords(r)) for c, r in zip(self.lines, rects)])
-        axes = '\n'.join([a.svg(ctx.coords(rect_base)) for a in self.axes])
+        rpad = (self.padding, self.padding, 1 - self.padding, 1 - self.padding)
+        ctx1 = ctx.coords(rpad)
 
-        return lines + axes
+        xpad, ypad = self.padding*xrange, self.padding*yrange
+        ctx2 = ctx.clone(xmin=xmin-xpad, xmax=xmax+xpad, ymin=ymin-ypad, ymax=ymax+ypad)
+
+        lines = '\n'.join([c.svg(ctx1.coords(r)) for c, r in zip(self.lines, rects)])
+        axes = '\n'.join([a.svg(ctx2.coords(rect_base)) for a in self.axes])
+
+        return lines + '\n' + axes
+
+class Node(Container):
+    def __init__(self, cx=0.5, cy=0.5, text=None, rx=None, ry=None, font_size=0.05, font_aspect=2, pad=None, **attr):
+        text_width = (font_size/font_aspect)*len(text)
+        text_height = font_size
+
+        if pad is None:
+            pad = 0.5*text_height
+        if ry is None:
+            ry = 0.5*text_height + pad
+        if rx is None:
+            rx = 0.5*text_width + pad
+
+        tx = cx - 0.5*text_width
+        ty = cy + 0.5*text_height
+
+        bubble = Ellipse(cx=cx, cy=cy, rx=rx, ry=ry)
+        label = Text(x=tx, y=ty, text=text, font_size=font_size)
+
+        super().__init__(children=[bubble, label], **attr)
