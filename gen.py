@@ -1,26 +1,27 @@
-# svg diagram maker
+################################
+## gen — an svg diagram maker ##
+################################
 
+import os
 import copy
 import numpy as np
+from collections import defaultdict
 
 # defaults
 size_base = (200, 200)
-rect_base = (0, 0, 1, 1)
+rect_base = (0, 0) + size_base
+frac_base = (0, 0, 1, 1)
+ns_svg = 'http://www.w3.org/2000/svg'
+
+##
+## basic tools
+##
 
 def demangle(k):
     return k.replace('_', '-')
 
 def dict_repr(d):
     return ' '.join([f'{demangle(k)}="{v}"' for k, v in d.items()])
-
-def map_coords(rect0, rect1):
-    xa0, ya0, xb0, yb0 = rect0
-    xa1, ya1, xb1, yb1 = rect1
-    w0, h0 = xb0 - xa0, yb0 - ya0
-    w1, h1 = xb1 - xa1, yb1 - ya1
-    xa2, ya2 = xa0 + xa1*w0, ya0 + ya1*h0
-    xb2, yb2 = xa0 + xb1*w0, ya0 + yb1*h0
-    return xa2, ya2, xb2, yb2
 
 def merge(d1, **d2):
     return {**d1, **d2}
@@ -30,8 +31,48 @@ def display(x, **kwargs):
         x = SVG([x], **kwargs)
     return x.svg()
 
+##
+## fonts
+##
+
+xdirs = os.environ.get('XDG_DATA_DIRS', None)
+if xdirs is None:
+    xdirs = ['/usr/share']
+else:
+    xdirs = xdirs.split(':')
+fdirs = [os.path.join(d, 'fonts') for d in xdirs]
+
+def load_font_family(fam, order=['ttf', 'otf']):
+    matches = defaultdict(list)
+    for d in fdirs:
+        for direc, _, fnames in os.walk(d):
+            for fn in fnames:
+                name, ext = os.path.splitext(fn)
+                if name == fam:
+                    fpath = os.path.join(direc, fn)
+                    matches[ext[1:]].append(fpath)
+    for ft in order:
+        if ft in matches:
+            return matches[ft][0]
+
+##
+## context
+##
+
+# rect0 — pixel rect
+# rect1 — fraction rect
+def map_coords(rect0, rect1):
+    xa0, ya0, xb0, yb0 = rect0
+    xa1, ya1, xb1, yb1 = rect1
+    w0, h0 = xb0 - xa0, yb0 - ya0
+    w1, h1 = xb1 - xa1, yb1 - ya1
+    xa2, ya2 = xa0 + xa1*w0, ya0 + ya1*h0
+    xb2, yb2 = xa0 + xb1*w0, ya0 + yb1*h0
+    return xa2, ya2, xb2, yb2
+
 class Context:
-    def __init__(self, **kwargs):
+    def __init__(self, rect=rect_base, **kwargs):
+        self.rect = rect
         for k, v in kwargs.items():
             setattr(self, k, v)
 
@@ -53,17 +94,25 @@ class Context:
     def deepcopy(self):
         return copy.deepcopy(self)
 
+##
+## core types
+##
+
 class Element:
-    def __init__(self, tag, **attr):
+    def __init__(self, tag, unary=False, **attr):
         self.tag = tag
+        self.unary = unary
         self.attr = attr
 
     def __repr__(self):
         attr = dict_repr(self.attr)
         return f'{self.tag}: {attr}'
 
+    def __add__(self, other):
+        return Container([self, other])
+
     def _repr_svg_(self):
-        return SVG((self, (0.01, 0.01, 0.99, 0.99)), size=size_base).svg()
+        return SVG(self).svg()
 
     def props(self, ctx):
         return self.attr
@@ -73,15 +122,19 @@ class Element:
 
     def svg(self, ctx=None):
         if ctx is None:
-            ctx = Context(rect=size_base)
+            ctx = Context()
 
         props = dict_repr(self.props(ctx))
-        inner = self.inner(ctx)
-
         pre = ' ' if len(props) > 0 else ''
-        pad = '\n' if len(inner) > 0 else ''
 
-        return f'<{self.tag}{pre}{props}>{inner}</{self.tag}>'
+        if self.unary:
+            return f'<{self.tag}{pre}{props} />'
+        else:
+            inner = self.inner(ctx)
+            return f'<{self.tag}{pre}{props}>{inner}</{self.tag}>'
+
+    def save(self, fname, **kwargs):
+        SVG(self, **kwargs).save(fname)
 
 class Container(Element):
     def __init__(self, children=None, tag='g', **attr):
@@ -90,11 +143,12 @@ class Container(Element):
             self.children = []
         else:
             self.children = [
-                (c if type(c) is tuple else (c, rect_base)) for c in children
+                (c if type(c) is tuple else (c, frac_base)) for c in children
             ]
 
     def inner(self, ctx):
-        return '\n' + '\n'.join([c.svg(ctx.coords(r)) for c, r in self.children]) + '\n'
+        inside = '\n'.join([c.svg(ctx.coords(r)) for c, r in self.children])
+        return f'\n{inside}\n'
 
 class SVG(Container):
     def __init__(self, children=None, size=size_base, **attr):
@@ -108,7 +162,7 @@ class SVG(Container):
 
     def props(self, ctx):
         w, h = self.size
-        base = dict(width=w, height=h)
+        base = dict(width=w, height=h, xmlns=ns_svg)
         return {**base, **self.attr}
 
     def svg(self):
@@ -121,9 +175,13 @@ class SVG(Container):
         with open(path, 'w+') as fid:
             fid.write(s)
 
+##
+## basic elements
+##
+
 class Line(Element):
     def __init__(self, x1=0, y1=0, x2=1, y2=1, **attr):
-        super().__init__(tag='line', **attr)
+        super().__init__(tag='line', unary=True, **attr)
         self.x1 = x1
         self.y1 = y1
         self.x2 = x2
@@ -143,7 +201,7 @@ class Line(Element):
 
 class Rect(Element):
     def __init__(self, x=0, y=0, w=1, h=1, **attr):
-        super().__init__(tag='rect', **attr)
+        super().__init__(tag='rect', unary=True, **attr)
         self.x = x
         self.y = y
         self.w = w
@@ -161,9 +219,14 @@ class Rect(Element):
         base = dict(x=x, y=y, width=w, height=h, fill='none', stroke='black')
         return {**base, **self.attr}
 
+def RectRad(cx=0.5, cy=0.5, rx=0.5, ry=0.5, **attr):
+    x, y = cx - rx, cy - ry
+    w, h = 2*rx, 2*ry
+    return Rect(x=x, y=y, w=w, h=h, **attr)
+
 class Ellipse(Element):
     def __init__(self, cx=0.5, cy=0.5, rx=0.5, ry=0.5, **attr):
-        super().__init__(tag='ellipse', **attr)
+        super().__init__(tag='ellipse', unary=True, **attr)
         self.cx = cx
         self.cy = cy
         self.rx = rx
@@ -181,12 +244,11 @@ class Ellipse(Element):
         base = dict(cx=cx, cy=cy, rx=rx, ry=ry, fill='none', stroke='black')
         return {**base, **self.attr}
 
-class Circle(Ellipse):
-    def __init__(self, cx=0.5, cy=0.5, r=0.5, **attr):
-        super().__init__(cx, cy, r, r, **attr)
+def Circle(cx=0.5, cy=0.5, r=0.5, **attr):
+    return Ellipse(cx=cx, cy=cy, rx=r, ry=r, **attr)
 
 class Text(Element):
-    def __init__(self, x=0, y=1, text='', font_size=0.05, **attr):
+    def __init__(self, x=0, y=1, text='', font_size=0.1, **attr):
         super().__init__(tag='text', **attr)
         self.x = x
         self.y = y
@@ -209,7 +271,7 @@ class Text(Element):
 
 class SymPath(Element):
     def __init__(self, fy=None, fx=None, xlim=None, ylim=None, tlim=None, N=100, **attr):
-        super().__init__(tag='polyline', **attr)
+        super().__init__(tag='polyline', unary=True, **attr)
 
         if fx is not None and fy is not None:
             tvals = np.linspace(*tlim, N)
@@ -268,9 +330,13 @@ class SymPath(Element):
         base = dict(points=points, fill='none', stroke='black')
         return {**base, **self.attr}
 
+##
+## compound elements
+##
+
 class Axis(Element):
     def __init__(self, orient, pos=0, **attr):
-        super().__init__(tag='line', **attr)
+        super().__init__(tag='line', unary=True, **attr)
         self.orient = orient
         self.pos = pos
 
@@ -326,12 +392,12 @@ class Plot(Element):
         ctx2 = ctx.clone(xmin=xmin-xpad, xmax=xmax+xpad, ymin=ymin-ypad, ymax=ymax+ypad)
 
         lines = '\n'.join([c.svg(ctx1.coords(r)) for c, r in zip(self.lines, rects)])
-        axes = '\n'.join([a.svg(ctx2.coords(rect_base)) for a in self.axes])
+        axes = '\n'.join([a.svg(ctx2.coords(frac_base)) for a in self.axes])
 
         return lines + '\n' + axes
 
 class Node(Container):
-    def __init__(self, cx=0.5, cy=0.5, text=None, rx=None, ry=None, font_size=0.05, font_aspect=2, pad=None, **attr):
+    def __init__(self, cx=0.5, cy=0.5, text=None, rx=None, ry=None, shape='ellipse', font_family='monospace', font_size=0.05, font_aspect=1.67, pad=None, **attr):
         text_width = (font_size/font_aspect)*len(text)
         text_height = font_size
 
@@ -345,7 +411,14 @@ class Node(Container):
         tx = cx - 0.5*text_width
         ty = cy + 0.5*text_height
 
-        bubble = Ellipse(cx=cx, cy=cy, rx=rx, ry=ry)
-        label = Text(x=tx, y=ty, text=text, font_size=font_size)
+        if shape == 'ellipse':
+            Shape = Ellipse
+        elif shape == 'rect':
+            Shape = RectRad
+        else:
+            Shape = shape
 
-        super().__init__(children=[bubble, label], **attr)
+        outer = Shape(cx=cx, cy=cy, rx=rx, ry=ry)
+        label = Text(x=tx, y=ty, text=text, font_family=font_family, font_size=font_size)
+
+        super().__init__(children=[outer, label], **attr)
