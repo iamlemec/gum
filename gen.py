@@ -5,7 +5,8 @@
 import os
 import copy
 import numpy as np
-from collections import defaultdict
+
+import fonts
 
 # defaults
 size_base = (200, 200)
@@ -30,30 +31,6 @@ def display(x, **kwargs):
     if type(x) is not SVG:
         x = SVG([x], **kwargs)
     return x.svg()
-
-##
-## fonts
-##
-
-xdirs = os.environ.get('XDG_DATA_DIRS', None)
-if xdirs is None:
-    xdirs = ['/usr/share']
-else:
-    xdirs = xdirs.split(':')
-fdirs = [os.path.join(d, 'fonts') for d in xdirs]
-
-def load_font_family(fam, order=['ttf', 'otf']):
-    matches = defaultdict(list)
-    for d in fdirs:
-        for direc, _, fnames in os.walk(d):
-            for fn in fnames:
-                name, ext = os.path.splitext(fn)
-                if name == fam:
-                    fpath = os.path.join(direc, fn)
-                    matches[ext[1:]].append(fpath)
-    for ft in order:
-        if ft in matches:
-            return matches[ft][0]
 
 ##
 ## context
