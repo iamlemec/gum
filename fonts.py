@@ -62,3 +62,17 @@ def get_text_shape(text, font='', path=None, debug=False):
     offsets = [(p.x_offset / norm, p.y_offset / norm) for p in positions]
 
     return cluster, shapes, deltas, offsets
+
+def get_text_size(text, **kwargs):
+    if len(text) == 0:
+        return 0, 0
+
+    cluster, shapes, deltas, offsets = get_text_shape(text, **kwargs)
+
+    hshapes, vshapes = zip(*shapes)
+    hdeltas, vdeltas = zip(*deltas)
+
+    width = sum(hdeltas)
+    height = max(vshapes)
+
+    return width, height

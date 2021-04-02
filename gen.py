@@ -225,11 +225,21 @@ def Circle(cx=0.5, cy=0.5, r=0.5, **attr):
     return Ellipse(cx=cx, cy=cy, rx=r, ry=r, **attr)
 
 class Text(Element):
-    def __init__(self, x=0, y=1, text='', font_size=0.1, **attr):
+    def __init__(self, text='', cx=0.5, cy=0.5, x=None, y=None, font_family='monospace', font_size=0.1, **attr):
         super().__init__(tag='text', **attr)
+
+        base_width, base_height = fonts.get_text_size(text, font=font_family)
+        self.text_width, self.text_height = font_size*base_width, font_size*base_height
+
+        if x is None:
+            x = cx - 0.5*self.text_width
+        if y is None:
+            y = cy + 0.5*self.text_height
+
         self.x = x
         self.y = y
         self.text = text
+        self.font_family = font_family
         self.font_size = font_size
 
     def props(self, ctx):
@@ -240,35 +250,35 @@ class Text(Element):
         y = y1 + h*self.y
         fs = h*self.font_size
 
-        base = dict(x=x, y=y, font_size=f'{fs}px', stroke='black')
+        base = dict(x=x, y=y, font_family=self.font_family, font_size=f'{fs}px', stroke='black')
         return {**base, **self.attr}
 
     def inner(self, ctx):
         return self.text
 
 class TextDebug(Element):
-    def __init__(self, x=0, y=1, text='', **attr):
+    def __init__(self, x=0, y=1, text='', font_family='monospace', **attr):
         super().__init__(tag='g')
-
-        self.text = Text(x=x, y=y, text=text, **attr)
-        font_family = self.text.attr.get('font_family', '')
-        cluster, shapes, deltas, offsets = fonts.get_text_shape(text, font=font_family)
-
-        print(shapes)
-        print(deltas)
-
-        yinv_shape = np.array([1, -1])
-        yinv_delta = np.array([1, -1])
-        shapes = yinv_shape[None, :]*np.array(shapes)
-        deltas = yinv_delta[None, :]*np.array(deltas)
-        cumdel = np.vstack([(0, 0), np.cumsum(deltas[:-1,:], axis=0)])
-        dshapes = np.vstack([deltas[:, 0], shapes[:, 1]]).T
 
         self.boxes = Rect(stroke='red')
         self.outer = Rect(stroke='blue', stroke_dasharray='5 5')
+        self.text = Text(x=x, y=y, text=text, font_family=font_family, **attr)
 
-        self.rects = np.hstack([cumdel, cumdel + dshapes])
-        self.total = np.array([np.sum(deltas[:, 0]), np.max(-shapes[:, 1])])
+        cluster, shapes, deltas, offsets = fonts.get_text_shape(text, font=font_family)
+        shapes = np.array([(w, -h) for w, h in shapes])
+        deltas = np.array([(x, -y) for x, y in deltas])
+
+        if len(deltas) == 0:
+            self.rects = np.array([]).reshape((-1, 4))
+            self.total = np.array([0, 0])
+        else:
+            cumdel = np.vstack([(0, 0), np.cumsum(deltas[:-1,:], axis=0)])
+            dshapes = np.vstack([deltas[:, 0], shapes[:, 1]]).T
+            self.rects = np.hstack([cumdel, cumdel + dshapes])
+            self.total = np.array([np.sum(deltas[:, 0]), np.max(-shapes[:, 1])])
+
+        self.font_family = font_family
+        self.text_width, self.text_height = self.total
 
     def inner(self, ctx):
         x1, y1, x2, y2 = ctx.rect
@@ -414,29 +424,24 @@ class Plot(Element):
 
         return lines + '\n' + axes
 
+shape_classes = {
+    'ellipse': Ellipse,
+    'rect': RectRad,
+}
+
 class Node(Container):
-    def __init__(self, cx=0.5, cy=0.5, text=None, rx=None, ry=None, shape='ellipse', font_family='monospace', font_size=0.05, font_aspect=1.67, pad=None, **attr):
-        text_width = (font_size/font_aspect)*len(text)
-        text_height = font_size
+    def __init__(self, cx=0.5, cy=0.5, text=None, rx=None, ry=None, shape='ellipse', font_family='monospace', font_size=0.05, font_aspect=1.67, pad=None, debug=False, **attr):
+        TextClass = TextDebug if debug else Text
+        label = TextClass(cx=cx, cy=cy, text=text, font_family=font_family, font_size=font_size)
 
         if pad is None:
-            pad = 0.5*text_height
+            pad = 0.5*label.text_height
         if ry is None:
-            ry = 0.5*text_height + pad
+            ry = 0.5*label.text_height + pad
         if rx is None:
-            rx = 0.5*text_width + pad
+            rx = 0.5*label.text_width + pad
 
-        tx = cx - 0.5*text_width
-        ty = cy + 0.5*text_height
-
-        if shape == 'ellipse':
-            Shape = Ellipse
-        elif shape == 'rect':
-            Shape = RectRad
-        else:
-            Shape = shape
-
-        outer = Shape(cx=cx, cy=cy, rx=rx, ry=ry)
-        label = Text(x=tx, y=ty, text=text, font_family=font_family, font_size=font_size)
+        ShapeClass = shape_classes.get(shape, shape)
+        outer = ShapeClass(cx=cx, cy=cy, rx=rx, ry=ry)
 
         super().__init__(children=[outer, label], **attr)
