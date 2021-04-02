@@ -246,6 +246,47 @@ class Text(Element):
     def inner(self, ctx):
         return self.text
 
+class TextDebug(Element):
+    def __init__(self, x=0, y=1, text='', **attr):
+        super().__init__(tag='g')
+
+        self.text = Text(x=x, y=y, text=text, **attr)
+        font_family = self.text.attr.get('font_family', '')
+        cluster, shapes, deltas, offsets = fonts.get_text_shape(text, font=font_family)
+
+        print(shapes)
+        print(deltas)
+
+        yinv_shape = np.array([1, -1])
+        yinv_delta = np.array([1, -1])
+        shapes = yinv_shape[None, :]*np.array(shapes)
+        deltas = yinv_delta[None, :]*np.array(deltas)
+        cumdel = np.vstack([(0, 0), np.cumsum(deltas[:-1,:], axis=0)])
+        dshapes = np.vstack([deltas[:, 0], shapes[:, 1]]).T
+
+        self.boxes = Rect(stroke='red')
+        self.outer = Rect(stroke='blue', stroke_dasharray='5 5')
+
+        self.rects = np.hstack([cumdel, cumdel + dshapes])
+        self.total = np.array([np.sum(deltas[:, 0]), np.max(-shapes[:, 1])])
+
+    def inner(self, ctx):
+        x1, y1, x2, y2 = ctx.rect
+        w, h = x2 - x1, y2 - y1
+
+        x = x1 + w*self.text.x
+        y = y1 + h*self.text.y
+
+        fs = h*self.text.font_size
+        crects = fs*self.rects
+        tsize = fs*self.total
+
+        inside = self.text.svg(ctx)
+        for cx0, cy1, cx1, cy0 in crects:
+            inside += '\n' + self.boxes.svg(ctx.clone(rect=(x + cx0, y + cy0, x + cx1, y + cy1)))
+        inside += '\n' + self.outer.svg(ctx.clone(rect=(x, y - tsize[1], x + tsize[0], y)))
+        return f'\n{inside}\n'
+
 class SymPath(Element):
     def __init__(self, fy=None, fx=None, xlim=None, ylim=None, tlim=None, N=100, **attr):
         super().__init__(tag='polyline', unary=True, **attr)
