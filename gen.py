@@ -38,14 +38,34 @@ def display(x, **kwargs):
 
 # rect0 — pixel rect
 # rect1 — fraction rect
-def map_coords(rect0, rect1):
-    xa0, ya0, xb0, yb0 = rect0
-    xa1, ya1, xb1, yb1 = rect1
-    w0, h0 = xb0 - xa0, yb0 - ya0
-    w1, h1 = xb1 - xa1, yb1 - ya1
-    xa2, ya2 = xa0 + xa1*w0, ya0 + ya1*h0
-    xb2, yb2 = xa0 + xb1*w0, ya0 + yb1*h0
-    return xa2, ya2, xb2, yb2
+def map_coords(prect, frect=frac_base, aspect=None):
+    pxa, pya, pxb, pyb = prect
+    fxa, fya, fxb, fyb = frect
+
+    pw, ph = pxb - pxa, pyb - pya
+    fw, fh = fxb - fxa, fyb - fya
+
+    pxa1, pya1 = pxa + fxa*pw, pya + fya*ph
+    pxb1, pyb1 = pxa + fxb*pw, pya + fyb*ph
+
+    if aspect is not None:
+        pw1, ph1 = fw*pw, fh*ph
+        asp1 = pw1/ph1
+
+        if asp1 == aspect: # just right
+            pass
+        elif asp1 > aspect: # too wide
+            pw2 = aspect*ph1
+            dpw = pw1 - pw2
+            pxa1 += 0.5*dpw
+            pxb1 -= 0.5*dpw
+        elif asp1 < aspect: # too tall
+            ph2 = pw1/aspect
+            dph = ph2 - ph1
+            pya1 -= 0.5*dph
+            pyb1 += 0.5*dph
+
+    return pxa1, pya1, pxb1, pyb1
 
 class Context:
     def __init__(self, rect=rect_base, **kwargs):
@@ -56,8 +76,8 @@ class Context:
     def __repr__(self):
         return str(self.__dict__)
 
-    def coords(self, rect):
-        rect1 = map_coords(self.rect, rect)
+    def __call__(self, rect, aspect=None):
+        rect1 = map_coords(self.rect, rect, aspect=aspect)
         ctx = self.copy()
         ctx.rect = rect1
         return ctx
@@ -76,9 +96,10 @@ class Context:
 ##
 
 class Element:
-    def __init__(self, tag, unary=False, **attr):
+    def __init__(self, tag, unary=False, aspect=None, **attr):
         self.tag = tag
         self.unary = unary
+        self.aspect = aspect
         self.attr = attr
 
     def __repr__(self):
@@ -113,23 +134,39 @@ class Element:
     def save(self, fname, **kwargs):
         SVG(self, **kwargs).save(fname)
 
+def rectify(r):
+    if r is None:
+        return frac_base
+    elif type(r) is not tuple:
+        return (r, r, 1-r, 1-r)
+    elif len(r) == 2:
+        rx, ry = r
+        return (rx, ry, 1-rx, 1-ry)
+    else:
+        return r
+
 class Container(Element):
     def __init__(self, children=None, tag='g', **attr):
         super().__init__(tag=tag, **attr)
         if children is None:
-            self.children = []
-        else:
-            self.children = [
-                (c if type(c) is tuple else (c, frac_base)) for c in children
-            ]
+            children = []
+        if isinstance(children, dict):
+            children = [(c, r) for c, r in children.items()]
+        if not isinstance(children, list):
+            children = [children]
+        children = [
+            (c if type(c) is tuple else (c, None)) for c in children
+        ]
+        children = [(c, rectify(r)) for c, r in children]
+        self.children = children
 
     def inner(self, ctx):
-        inside = '\n'.join([c.svg(ctx.coords(r)) for c, r in self.children])
+        inside = '\n'.join([c.svg(ctx(r, c.aspect)) for c, r in self.children])
         return f'\n{inside}\n'
 
 class SVG(Container):
     def __init__(self, children=None, size=size_base, **attr):
-        if children is not None and type(children) is not list:
+        if children is not None and not isinstance(children, (list, dict)):
             children = [children]
         super().__init__(children=children, tag='svg', **attr)
         self.size = size
@@ -156,6 +193,7 @@ class SVG(Container):
 ## basic elements
 ##
 
+# should this be atomic? or just an angle?
 class Line(Element):
     def __init__(self, x1=0, y1=0, x2=1, y2=1, **attr):
         super().__init__(tag='line', unary=True, **attr)
@@ -177,125 +215,120 @@ class Line(Element):
         return {**base, **self.attr}
 
 class Rect(Element):
-    def __init__(self, x=0, y=0, w=1, h=1, **attr):
-        super().__init__(tag='rect', unary=True, **attr)
-        self.x = x
-        self.y = y
-        self.w = w
-        self.h = h
+    def __init__(self, **attr):
+        base = dict(fill='none', stroke='black')
+        attr1 = {**base, **attr}
+        super().__init__(tag='rect', unary=True, **attr1)
 
     def props(self, ctx):
         x1, y1, x2, y2 = ctx.rect
         w0, h0 = x2 - x1, y2 - y1
 
-        x = x1 + w0*self.x
-        y = y1 + h0*self.y
-        w = w0*self.w
-        h = h0*self.h
+        x, y = x1, y1
+        w, h = w0, h0
 
-        base = dict(x=x, y=y, width=w, height=h, fill='none', stroke='black')
+        base = dict(x=x, y=y, width=w, height=h)
         return {**base, **self.attr}
 
-def RectRad(cx=0.5, cy=0.5, rx=0.5, ry=0.5, **attr):
-    x, y = cx - rx, cy - ry
-    w, h = 2*rx, 2*ry
-    return Rect(x=x, y=y, w=w, h=h, **attr)
+class Square(Rect):
+    def __init__(self, **attr):
+        super().__init__(aspect=1, **attr)
 
 class Ellipse(Element):
     def __init__(self, cx=0.5, cy=0.5, rx=0.5, ry=0.5, **attr):
-        super().__init__(tag='ellipse', unary=True, **attr)
-        self.cx = cx
-        self.cy = cy
-        self.rx = rx
-        self.ry = ry
+        base = dict(fill='none', stroke='black')
+        attr1 = {**base, **attr}
+        super().__init__(tag='ellipse', unary=True, **attr1)
 
     def props(self, ctx):
         x1, y1, x2, y2 = ctx.rect
         w, h = x2 - x1, y2 - y1
 
-        cx = x1 + w*self.cx
-        cy = y1 + h*self.cy
-        rx = w*self.rx
-        ry = h*self.ry
+        cx = x1 + 0.5*w
+        cy = y1 + 0.5*h
+        rx = 0.5*w
+        ry = 0.5*h
 
-        base = dict(cx=cx, cy=cy, rx=rx, ry=ry, fill='none', stroke='black')
+        base = dict(cx=cx, cy=cy, rx=rx, ry=ry)
         return {**base, **self.attr}
 
-def Circle(cx=0.5, cy=0.5, r=0.5, **attr):
-    return Ellipse(cx=cx, cy=cy, rx=r, ry=r, **attr)
+class Circle(Ellipse):
+    def __init__(self, **attr):
+        super().__init__(aspect=1, **attr)
 
+# this is an atomic element
 class Text(Element):
-    def __init__(self, text='', cx=0.5, cy=0.5, x=None, y=None, font_family='monospace', font_size=0.1, **attr):
-        super().__init__(tag='text', **attr)
-
-        base_width, base_height = fonts.get_text_size(text, font=font_family)
-        self.text_width, self.text_height = font_size*base_width, font_size*base_height
-
-        if x is None:
-            x = cx - 0.5*self.text_width
-        if y is None:
-            y = cy + 0.5*self.text_height
-
-        self.x = x
-        self.y = y
+    def __init__(self, text='', font_family='monospace', **attr):
+        self.text_width, self.text_height = fonts.get_text_size(text, font=font_family)
         self.text = text
-        self.font_family = font_family
-        self.font_size = font_size
+
+        base_aspect = self.text_width/self.text_height
+        super().__init__(tag='text', aspect=base_aspect, font_family=font_family, **attr)
 
     def props(self, ctx):
         x1, y1, x2, y2 = ctx.rect
         w, h = x2 - x1, y2 - y1
 
-        x = x1 + w*self.x
-        y = y1 + h*self.y
-        fs = h*self.font_size
+        fs = h/self.text_height
 
-        base = dict(x=x, y=y, font_family=self.font_family, font_size=f'{fs}px', stroke='black')
+        base = dict(x=x1, y=y2, font_size=f'{fs}px', stroke='black')
         return {**base, **self.attr}
 
     def inner(self, ctx):
         return self.text
 
-class TextDebug(Element):
-    def __init__(self, x=0, y=1, text='', font_family='monospace', **attr):
-        super().__init__(tag='g')
+class TextDebug(Container):
+    def __init__(self, text='', font_family='monospace', **attr):
+        label = Text(text=text, font_family=font_family, **attr)
+        boxes = Rect(stroke='red')
+        outer = Rect(stroke='blue', stroke_dasharray='5 5')
 
-        self.boxes = Rect(stroke='red')
-        self.outer = Rect(stroke='blue', stroke_dasharray='5 5')
-        self.text = Text(x=x, y=y, text=text, font_family=font_family, **attr)
+        # mimic regular Text
+        self.text_width = label.text_width
+        self.text_height = label.text_height
 
+        # get full font shaping info
         cluster, shapes, deltas, offsets = fonts.get_text_shape(text, font=font_family)
-        shapes = np.array([(w, -h) for w, h in shapes])
-        deltas = np.array([(x, -y) for x, y in deltas])
+        shapes = [(w, h) for w, h in shapes]
+        deltas = [(w, -h) for w, h in deltas]
 
+        # compute character boxes
         if len(deltas) == 0:
-            self.rects = np.array([]).reshape((-1, 4))
-            self.total = np.array([0, 0])
+            crects = []
         else:
-            cumdel = np.vstack([(0, 0), np.cumsum(deltas[:-1,:], axis=0)])
-            dshapes = np.vstack([deltas[:, 0], shapes[:, 1]]).T
-            self.rects = np.hstack([cumdel, cumdel + dshapes])
-            self.total = np.array([np.sum(deltas[:, 0]), np.max(-shapes[:, 1])])
+            tw, th = self.text_width, self.text_height
+            cumdel = [(0, 0)] +  [tuple(x) for x in np.cumsum(deltas[:-1], axis=0)]
+            dshapes = [(dx, sy) for (dx, _), (_, sy) in zip(deltas, shapes)]
+            rects = [(cx, cy, cx+dx, cy+dy) for (cx, cy), (dx, dy) in zip(cumdel, dshapes)]
+            crects = [(x1/tw, 1-y2/th, x2/tw, 1-y1/th) for x1, y1, x2, y2 in rects]
 
-        self.font_family = font_family
-        self.text_width, self.text_height = self.total
+        # render proportionally
+        children = [label]
+        children += [(boxes, tuple(frac)) for frac in crects]
+        children += [outer]
 
-    def inner(self, ctx):
-        x1, y1, x2, y2 = ctx.rect
-        w, h = x2 - x1, y2 - y1
+        super().__init__(tag='g', children=children, aspect=label.aspect, **attr)
 
-        x = x1 + w*self.text.x
-        y = y1 + h*self.text.y
+shape_classes = {
+    'ellipse': Ellipse,
+    'rect': Rect,
+}
 
-        fs = h*self.text.font_size
-        crects = fs*self.rects
-        tsize = fs*self.total
+class Node(Container):
+    def __init__(self, text=None, pad=0.15, shape='ellipse', text_args={}, shape_args={}, **attr):
+        ShapeClass = shape_classes.get(shape, shape)
 
-        inside = self.text.svg(ctx)
-        for cx0, cy1, cx1, cy0 in crects:
-            inside += '\n' + self.boxes.svg(ctx.clone(rect=(x + cx0, y + cy0, x + cx1, y + cy1)))
-        inside += '\n' + self.outer.svg(ctx.clone(rect=(x, y - tsize[1], x + tsize[0], y)))
-        return f'\n{inside}\n'
+        label = Text(text=text, **text_args)
+        outer = ShapeClass(**shape_args)
+
+        aspect0 = label.aspect
+        aspect1 = aspect0*(1+2*pad/aspect0)/(1+2*pad)
+
+        super().__init__(children={label: pad, outer: None}, aspect=aspect1, **attr)
+
+##
+## plotting
+##
 
 class SymPath(Element):
     def __init__(self, fy=None, fx=None, xlim=None, ylim=None, tlim=None, N=100, **attr):
@@ -358,9 +391,39 @@ class SymPath(Element):
         base = dict(points=points, fill='none', stroke='black')
         return {**base, **self.attr}
 
-##
-## compound elements
-##
+class Tick(Container):
+    def __init__(self, text=None, loc='l', thick=3, pad=0.5, text_args={}, **attr):
+        if text is None:
+            line = Line(pad, 0.5, 1-pad, 0.5, stroke_width=thick)
+            aspect = 1
+            children = [line]
+        else:
+            text = Text(text, **text_args)
+            line = Line(0, 0.5, 1, 0.5, stroke_width=thick)
+            rect = Rect(stroke='red')
+
+            taspect = text.aspect
+            aspect = taspect + pad + 1
+            ftext, fpad = taspect/aspect, (taspect+pad)/aspect
+
+            children = {
+                text: (0, 0, ftext, 1),
+                line: (fpad, 0, 1, 1),
+                rect: None
+            }
+
+        super().__init__(children=children, aspect=aspect, **attr)
+
+class Scale(Container):
+    def __init__(self, ticks, height=0.05, tick_args={}, **attr):
+        if type(ticks) is dict:
+            ticks = [(k, v) for k, v in ticks.items()]
+        children = {
+            Tick(s, **tick_args): (0, 1-(x-height/2), 1, 1-(x+height/2))
+            for x, s in ticks
+        }
+        aspect = height*max([c.aspect for c in children.keys()])
+        super().__init__(children=children, aspect=aspect, **attr)
 
 class Axis(Element):
     def __init__(self, orient, pos=0, **attr):
@@ -414,34 +477,12 @@ class Plot(Element):
         rects = [r for r in zip(x1s, y1s, x2s, y2s)]
 
         rpad = (self.padding, self.padding, 1 - self.padding, 1 - self.padding)
-        ctx1 = ctx.coords(rpad)
+        ctx1 = ctx(rpad)
 
         xpad, ypad = self.padding*xrange, self.padding*yrange
         ctx2 = ctx.clone(xmin=xmin-xpad, xmax=xmax+xpad, ymin=ymin-ypad, ymax=ymax+ypad)
 
-        lines = '\n'.join([c.svg(ctx1.coords(r)) for c, r in zip(self.lines, rects)])
-        axes = '\n'.join([a.svg(ctx2.coords(frac_base)) for a in self.axes])
+        lines = '\n'.join([c.svg(ctx1(r)) for c, r in zip(self.lines, rects)])
+        axes = '\n'.join([a.svg(ctx2(frac_base)) for a in self.axes])
 
         return lines + '\n' + axes
-
-shape_classes = {
-    'ellipse': Ellipse,
-    'rect': RectRad,
-}
-
-class Node(Container):
-    def __init__(self, cx=0.5, cy=0.5, text=None, rx=None, ry=None, shape='ellipse', font_family='monospace', font_size=0.05, font_aspect=1.67, pad=None, debug=False, **attr):
-        TextClass = TextDebug if debug else Text
-        label = TextClass(cx=cx, cy=cy, text=text, font_family=font_family, font_size=font_size)
-
-        if pad is None:
-            pad = 0.5*label.text_height
-        if ry is None:
-            ry = 0.5*label.text_height + pad
-        if rx is None:
-            rx = 0.5*label.text_width + pad
-
-        ShapeClass = shape_classes.get(shape, shape)
-        outer = ShapeClass(cx=cx, cy=cy, rx=rx, ry=ry)
-
-        super().__init__(children=[outer, label], **attr)
