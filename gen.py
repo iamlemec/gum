@@ -5,6 +5,7 @@
 import os
 import copy
 import numpy as np
+from collections import defaultdict
 
 import fonts
 
@@ -24,8 +25,17 @@ def demangle(k):
 def dict_repr(d):
     return ' '.join([f'{demangle(k)}="{v}"' for k, v in d.items()])
 
-def merge(d1, **d2):
-    return {**d1, **d2}
+def dispatch(d, keys):
+    rest = {}
+    subs = defaultdict(dict)
+    for k, v in d.items():
+        for s in keys:
+            if k.startswith(f'{s}_'):
+                k1 = k[len(s)+1:]
+                subs[s][k1] = v
+            else:
+                rest[k] = v
+    return rest, *[subs[s] for s in keys]
 
 def display(x, **kwargs):
     if type(x) is not SVG:
@@ -188,6 +198,14 @@ class SVG(Container):
         s = self.svg()
         with open(path, 'w+') as fid:
             fid.write(s)
+
+##
+## container types
+##
+
+class Frame(Container):
+    def __init__(self, child, pad=0, **attr):
+        super().__init__(children={child: pad}, **attr)
 
 ##
 ## basic elements
@@ -392,15 +410,16 @@ class SymPath(Element):
         return {**base, **self.attr}
 
 class Tick(Container):
-    def __init__(self, text=None, loc='l', thick=3, pad=0.5, text_args={}, **attr):
-        if text is None:
-            line = Line(pad, 0.5, 1-pad, 0.5, stroke_width=thick)
+    def __init__(self, text=None, loc='l', thick=1, pad=0.5, **attr):
+        attr, text_args = dispatch(attr, ['text'])
+
+        if text is None or len(text) == 0:
+            line = Line(0, 0.5, 1, 0.5, stroke_width=thick)
             aspect = 1
             children = [line]
         else:
             text = Text(text, **text_args)
             line = Line(0, 0.5, 1, 0.5, stroke_width=thick)
-            rect = Rect(stroke='red')
 
             taspect = text.aspect
             aspect = taspect + pad + 1
@@ -408,8 +427,7 @@ class Tick(Container):
 
             children = {
                 text: (0, 0, ftext, 1),
-                line: (fpad, 0, 1, 1),
-                rect: None
+                line: (fpad, 0, 1, 1)
             }
 
         super().__init__(children=children, aspect=aspect, **attr)
@@ -418,36 +436,30 @@ class Scale(Container):
     def __init__(self, ticks, height=0.05, tick_args={}, **attr):
         if type(ticks) is dict:
             ticks = [(k, v) for k, v in ticks.items()]
+
+        elems = [Tick(s, **tick_args) for _, s in ticks]
+        locs = [x for x, _ in ticks]
+
+        # aspect per tick and overall
+        aspect0 = max([e.aspect for e in elems])
+        aspect = height*aspect0
+
+        # middle of the tick (fractional)
+        self.anchor = (aspect0-0.5)/aspect0
+
         children = {
-            Tick(s, **tick_args): (0, 1-(x-height/2), 1, 1-(x+height/2))
-            for x, s in ticks
+            e: (1-e.aspect/aspect0, 1-(x-height/2), 1, 1-(x+height/2))
+            for e, x in zip(elems, locs)
         }
-        aspect = height*max([c.aspect for c in children.keys()])
         super().__init__(children=children, aspect=aspect, **attr)
 
-class Axis(Element):
-    def __init__(self, orient, pos=0, **attr):
-        super().__init__(tag='line', unary=True, **attr)
-        self.orient = orient
-        self.pos = pos
-
-    def props(self, ctx):
-        x1, y1, x2, y2 = ctx.rect
-        w, h = x2 - x1, y2 - y1
-
-        if self.orient in ('h', 'x'):
-            fy = (ctx.ymax-self.pos)/(ctx.ymax-ctx.ymin)
-            y = y1 + fy*h
-            y1p,  y2p = y, y
-            x1p, x2p = x1, x2
-        elif self.orient in ('v', 'y'):
-            fx = (self.pos-ctx.xmin)/(ctx.xmax-ctx.xmin)
-            x = x1 + fx*w
-            x1p, x2p = x, x
-            y1p, y2p = y1, y2
-
-        base = dict(x1=x1p, y1=y1p, x2=x2p, y2=y2p, stroke='black')
-        return {**base, **self.attr}
+class Axis(Container):
+    def __init__(self, tick_map, tick_height=0.05, **attr):
+        attr, tick_args = dispatch(attr, ['tick'])
+        scale = Scale(tick_map, height=tick_height, tick_args=tick_args)
+        line = Line(scale.anchor, 0, scale.anchor, 1)
+        self.anchor = scale.anchor
+        super().__init__(children=[scale, line], aspect=scale.aspect, **attr)
 
 class Plot(Element):
     def __init__(self, lines=None, xaxis=0, yaxis=0, padding=0.05, **attr):
