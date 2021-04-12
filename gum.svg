@@ -1,0 +1,10 @@
+<svg width="250" height="110" xmlns="http://www.w3.org/2000/svg">
+<g>
+<text x="25.000000000000014" y="85.12396694214875" font-size="82.64462809917354px" stroke="black" font-family="Montserrat">gum</text>
+<rect x="25.0" y="24.87603305785124" width="56.69421487603307" height="60.24793388429751" fill="none" stroke="red" />
+<rect x="81.69421487603307" y="41.239669421487605" width="55.61983471074379" height="43.88429752066115" fill="none" stroke="red" />
+<rect x="137.31404958677686" y="41.32231404958677" width="87.68595041322314" height="43.80165289256198" fill="none" stroke="red" />
+<rect x="25.0" y="24.87603305785124" width="200.0" height="60.24793388429751" fill="none" stroke="blue" stroke-dasharray="5 5" />
+</g>
+<rect x="0" y="0" width="250" height="110" fill="none" stroke="black" />
+</svg>
