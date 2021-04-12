@@ -10,11 +10,17 @@ from math import sqrt
 
 import fonts
 
-# defaults
+##
+## defaults
+##
+
+ns_svg = 'http://www.w3.org/2000/svg'
+
 size_base = 200
 rect_base = (0, 0, 100, 100)
 frac_base = (0, 0, 1, 1)
-ns_svg = 'http://www.w3.org/2000/svg'
+
+tick_size_base = 0.05
 
 ##
 ## basic tools
@@ -233,12 +239,26 @@ class SVG(Container):
 
 class Frame(Container):
     def __init__(self, child, padding=0, margin=0, border=None, aspect=None, **attr):
-        aspect = child.aspect if aspect is None else aspect
-        children = [(child, padding+margin)]
+        padding = rectify(padding)
+        margin = rectify(margin)
+
+        pxa, pya, pxb, pyb = padding
+        mxa, mya, mxb, myb = margin
+        txa, tya = pxa + mxa, pya + mya
+        txb, tyb = 1-(1-pxb)-(1-mxb), 1-(1-pyb)-(1-myb)
+
+        total = txa, tya, txb, tyb
+        totw = txa + txb
+        toth = (1-tya) + (1-tyb)
+
+        children = [(child, total)]
+        aspect = (child.aspect+totw)/(1+toth) if aspect is None else aspect
+
         if border is not None:
             attr, rect_args = dispatch(attr, ['rect'])
             rect = Rect(stroke_width=border, aspect=aspect, **rect_args)
             children += [(rect, margin)]
+
         super().__init__(children=children, aspect=aspect, **attr)
 
 class Point(Container):
@@ -465,7 +485,7 @@ class SymPath(Element):
 ##
 
 class HTick(Container):
-    def __init__(self, text, thick=1, pad=0.5, debug=False, **attr):
+    def __init__(self, text, thick=1, pad=0.5, text_scale=1, debug=False, **attr):
         attr, text_args = dispatch(attr, ['text'])
 
         line = Line(0, 0.5, 1, 0.5, stroke_width=thick)
@@ -478,21 +498,25 @@ class HTick(Container):
         else:
             TextClass = TextDebug if debug else Text
             text = TextClass(text, **text_args) if type(text) is str else text
-            taspect = text.aspect
+            tsize = text.aspect*text_scale
 
-            aspect = taspect + pad + 1
-            anchor = 1 - 0.5/aspect
+            width = tsize + pad + 1
+            height = text_scale
+            aspect = width/height
+            anchor = 1 - 0.5/width
 
             children = {
-                text: (0, 0, taspect/aspect, 1),
-                line: ((taspect+pad)/aspect, 0, 1, 1)
+                text: (0, 0, tsize/width, 1),
+                line: ((tsize+pad)/width, 0, 1, 1)
             }
 
         super().__init__(children=children, aspect=aspect, **attr)
         self.anchor = anchor
+        self.width = width
+        self.height = height
 
 class VTick(Container):
-    def __init__(self, text, thick=1, pad=0.5, debug=False, **attr):
+    def __init__(self, text, thick=1, pad=0.5, text_scale=1, debug=False, **attr):
         attr, text_args = dispatch(attr, ['text'])
 
         line = Line(0.5, 0, 0.5, 1, stroke_width=thick)
@@ -505,22 +529,25 @@ class VTick(Container):
         else:
             TextClass = TextDebug if debug else Text
             text = TextClass(text, **text_args) if type(text) is str else text
-            taspect = text.aspect
+            taspect = text.aspect*text_scale
 
-            aspect = taspect/(2 + pad)
-            anchor = 1 - 0.5/(2 + pad)
+            width = taspect
+            height = 1 + pad + text_scale
+            aspect = width/height
+            anchor = 1 - 0.5/height
 
             children = {
-                line: (0, 0, 1, 1/(2+pad)),
-                text: (0, (1+pad)/(2+pad), 1, 1)
+                line: (0, 0, 1, 1/height),
+                text: (0, (1+pad)/height, 1, 1)
             }
 
         super().__init__(children=children, aspect=aspect, **attr)
         self.anchor = anchor
-        self.height = 2 + pad
+        self.width = width
+        self.height = height
 
 class VScale(Container):
-    def __init__(self, ticks, tick_size=0.05, tick_args={}, **attr):
+    def __init__(self, ticks, tick_size=tick_size_base, tick_args={}, **attr):
         if type(ticks) is dict:
             ticks = [(k, v) for k, v in ticks.items()]
 
@@ -528,14 +555,15 @@ class VScale(Container):
         locs = [x for x, _ in ticks]
 
         # aspect per tick and overall
+        width0 = max([e.width for e in elems]) if len(elems) > 0 else 1
         aspect0 = max([e.aspect for e in elems]) if len(elems) > 0 else 1
-        aspect = tick_size*aspect0
+        aspect = width0/(1/tick_size)
 
         # middle of the tick (fractional)
-        anchor = (aspect0-0.5)/aspect0
+        anchor = (width0-0.5)/width0
 
         children = {
-            e: (1-e.aspect/aspect0, 1-(x-tick_size/2), 1, 1-(x+tick_size/2))
+            e: (1-e.width/width0, 1-(x-tick_size/2), 1, 1-(x+tick_size/2))
             for e, x in zip(elems, locs)
         }
 
@@ -543,7 +571,7 @@ class VScale(Container):
         self.anchor = anchor
 
 class HScale(Container):
-    def __init__(self, ticks, tick_size=0.05, tick_args={}, **attr):
+    def __init__(self, ticks, tick_size=tick_size_base, tick_args={}, **attr):
         if type(ticks) is dict:
             ticks = [(k, v) for k, v in ticks.items()]
 
@@ -551,14 +579,15 @@ class HScale(Container):
         locs = [x for x, _ in ticks]
 
         # aspect per tick and overall
-        height = max([e.height for e in elems]) if len(elems) > 0 else 1
-        aspect = 1/(tick_size*height)
+        height0 = max([e.height for e in elems]) if len(elems) > 0 else 1
+        aspect0 = max([e.aspect for e in elems]) if len(elems) > 0 else 1
+        aspect = (1/tick_size)/height0
 
         # middle of the tick (fractional)
-        anchor = 0.5/height
+        anchor = 0.5/height0
 
         children = {
-            e: (x-e.aspect/aspect/2, 1-e.height/height, x+e.aspect/aspect/2, 1)
+            e: (x-e.aspect/aspect/2, 1-e.height/height0, x+e.aspect/aspect/2, 1)
             for e, x in zip(elems, locs)
         }
 
@@ -566,7 +595,7 @@ class HScale(Container):
         self.anchor = anchor
 
 class VAxis(Container):
-    def __init__(self, ticks, tick_size=0.05, **attr):
+    def __init__(self, ticks, tick_size=tick_size_base, **attr):
         attr, tick_args = dispatch(attr, ['tick'])
         scale = VScale(ticks, tick_size=tick_size, tick_args=tick_args)
         line = Line(scale.anchor, 0, scale.anchor, 1)
@@ -574,7 +603,7 @@ class VAxis(Container):
         self.anchor = scale.anchor
 
 class HAxis(Container):
-    def __init__(self, ticks, tick_size=0.05, **attr):
+    def __init__(self, ticks, tick_size=tick_size_base, **attr):
         attr, tick_args = dispatch(attr, ['tick'])
         scale = HScale(ticks, tick_size=tick_size, tick_args=tick_args)
         line = Line(0, scale.anchor, 1, scale.anchor)
@@ -584,6 +613,13 @@ class HAxis(Container):
 class Axes(Container):
     def __init__(self, xticks=[], yticks=[], aspect=None, **attr):
         attr, xaxis_args, yaxis_args = dispatch(attr, ['xaxis', 'yaxis'])
+
+        # adjust tick_size for aspect
+        if aspect is not None:
+            xtick_size = xaxis_args.get('tick_size', tick_size_base)
+            ytick_size = yaxis_args.get('tick_size', tick_size_base)
+            xaxis_args['tick_size'] = xtick_size/sqrt(aspect)
+            yaxis_args['tick_size'] = ytick_size*sqrt(aspect)
 
         if xticks is not None:
             xaxis = HAxis(xticks, **xaxis_args)
