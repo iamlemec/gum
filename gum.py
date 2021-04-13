@@ -52,6 +52,64 @@ def display(x, **kwargs):
         x = SVG([x], **kwargs)
     return x.svg()
 
+def dedict(d, default=None):
+    if type(d) is dict:
+        d = [(k, v) for k, v in d.items()]
+    return [
+        (x if type(x) is tuple else (x, default)) for x in d
+    ]
+
+##
+## math tools
+##
+
+def cumsum(a):
+    tot = 0
+    for x in a:
+        tot += x
+        yield tot
+
+##
+## rect tools
+##
+
+def pos_rect(r):
+    if r is None:
+        return frac_base
+    elif type(r) is not tuple:
+        return (0, 0, r, r)
+    elif len(r) == 2:
+        rx, ry = r
+        return (0, 0, rx, ry)
+    else:
+        return r
+
+def pad_rect(p, base=frac_base):
+    xa, ya, xb, yb = base
+    if p is None:
+        return base
+    elif type(p) is not tuple:
+        return (xa+p, ya+p, xb-p, yb-p)
+    elif len(p) == 2:
+        px, py = p
+        return (xa+px, ya+py, xb-px, yb-py)
+    else:
+        pxa, pya, pxb, pyb = p
+        return (xa+pxa, ya+pya, xb-pxb, yb-pyb)
+
+def merge_rects(rects):
+    xa, ya, xb, yb = zip(*rects)
+    return min(xa), min(ya), max(xb), max(yb)
+
+def rect_dims(rect):
+    xa, ya, xb, yb = rect
+    w, h = xb - xa, yb - ya
+    return w, h
+
+def rect_aspect(rect):
+    w, h = rect_dims(rect)
+    return w/h
+
 ##
 ## context
 ##
@@ -154,17 +212,6 @@ class Element:
     def save(self, fname, **kwargs):
         SVG(self, **kwargs).save(fname)
 
-def rectify(r):
-    if r is None:
-        return frac_base
-    elif type(r) is not tuple:
-        return (r, r, 1-r, 1-r)
-    elif len(r) == 2:
-        rx, ry = r
-        return (rx, ry, 1-rx, 1-ry)
-    else:
-        return r
-
 class Container(Element):
     def __init__(self, children=None, tag='g', **attr):
         super().__init__(tag=tag, **attr)
@@ -177,7 +224,7 @@ class Container(Element):
         children = [
             (c if type(c) is tuple else (c, None)) for c in children
         ]
-        children = [(c, rectify(r)) for c, r in children]
+        children = [(c, pos_rect(r)) for c, r in children]
         self.children = children
 
     def child(self, i):
@@ -186,15 +233,6 @@ class Container(Element):
     def inner(self, ctx):
         inside = '\n'.join([c.svg(ctx(r, c.aspect)) for c, r in self.children])
         return f'\n{inside}\n'
-
-def merge_rects(rects):
-    xa, ya, xb, yb = zip(*rects)
-    return min(xa), min(ya), max(xb), max(yb)
-
-def rect_aspect(rect):
-    xa, ya, xb, yb = rect
-    w, h = xb - xa, yb - ya
-    return w/h
 
 class SVG(Container):
     def __init__(self, children=None, size=size_base, clip=True, **attr):
@@ -239,25 +277,24 @@ class SVG(Container):
 
 class Frame(Container):
     def __init__(self, child, padding=0, margin=0, border=None, aspect=None, **attr):
-        padding = rectify(padding)
-        margin = rectify(margin)
+        mrect = pad_rect(margin)
+        prect = pad_rect(padding)
+        trect = pad_rect(padding, base=mrect)
 
-        pxa, pya, pxb, pyb = padding
-        mxa, mya, mxb, myb = margin
-        txa, tya = pxa + mxa, pya + mya
-        txb, tyb = 1-(1-pxb)-(1-mxb), 1-(1-pyb)-(1-myb)
-
-        total = txa, tya, txb, tyb
-        totw = txa + txb
-        toth = (1-tya) + (1-tyb)
-
-        children = [(child, total)]
-        aspect = (child.aspect+totw)/(1+toth) if aspect is None else aspect
-
+        children = [(child, trect)]
         if border is not None:
             attr, rect_args = dispatch(attr, ['rect'])
-            rect = Rect(stroke_width=border, aspect=aspect, **rect_args)
-            children += [(rect, margin)]
+            if child.aspect is not None:
+                pw, ph = rect_dims(prect)
+                raspect = child.aspect*(ph/pw)
+            else:
+                raspect = None
+            rect = Rect(stroke_width=border, aspect=raspect, **rect_args)
+            children += [(rect, mrect)]
+
+        if aspect is None and child.aspect is not None:
+            tw, th = rect_dims(trect)
+            aspect = child.aspect*(th/tw)
 
         super().__init__(children=children, aspect=aspect, **attr)
 
@@ -267,6 +304,28 @@ class Point(Container):
             x, y = xy
         aspect = child.aspect if aspect is None else aspect
         children = [(child, (x-r, y-r, x+r, y+r))]
+        super().__init__(children=children, aspect=aspect, **attr)
+
+class VStack(Container):
+    def __init__(self, children, expand=True, aspect=None, **attr):
+        n = len(children)
+        children, heights = zip(*dedict(children, 1/n))
+        aspects = np.array([(c.aspect if c.aspect is not None else n) for c in children])
+
+        if expand:
+            heights = np.array(heights)/aspects
+            heights /= np.sum(heights)
+        else:
+            heights = np.array(heights)
+
+        cheights = np.r_[0, np.cumsum(heights)]
+        children = [
+            (c, (0, fh0, 1, fh1)) for c, fh0, fh1 in zip(children, cheights[:-1], cheights[1:])
+        ]
+
+        aspect0 = np.max(heights*aspects)
+        aspect = aspect0 if aspect is None else aspect
+
         super().__init__(children=children, aspect=aspect, **attr)
 
 ##
@@ -413,7 +472,12 @@ class Node(Container):
         aspect0 = label.aspect
         aspect1 = aspect0*(1+2*pad/aspect0)/(1+2*pad)
 
-        super().__init__(children={label: pad, outer: None}, aspect=aspect1, **attr)
+        children = {
+            label: pad_rect(pad),
+            outer: None
+        }
+
+        super().__init__(children=children, aspect=aspect1, **attr)
 
 ##
 ## curves
