@@ -14,13 +14,17 @@ import fonts
 ## defaults
 ##
 
+# namespace
 ns_svg = 'http://www.w3.org/2000/svg'
 
+# sizing
 size_base = 200
 rect_base = (0, 0, 100, 100)
 frac_base = (0, 0, 1, 1)
 
-tick_size_base = 0.05
+# specific elements
+default_tick_size = 0.05
+default_font_family = 'Montserrat'
 
 ##
 ## basic tools
@@ -31,6 +35,20 @@ def demangle(k):
 
 def dict_repr(d):
     return ' '.join([f'{demangle(k)}="{v}"' for k, v in d.items()])
+
+def value_repr(x):
+    if type(x) is str:
+        return f'"{x}"'
+    else:
+        return x
+
+def rule_repr(d, tab=4*' '):
+    return '\n'.join([f'{tab}{demangle(k)}: {value_repr(v)};' for k, v in d.items()])
+
+def style_repr(d):
+    return '\n\n'.join([
+        tag + ' {\n' + rule_repr(rules) + '\n}' for tag, rules in d.items()
+    ])
 
 def dispatch(d, keys):
     rest = {}
@@ -187,8 +205,15 @@ class Element:
     def __add__(self, other):
         return Container([self, other])
 
+    def __or__(self, other):
+        return HStack([self, other])
+
+    def __and__(self, other):
+        return VStack([self, other])
+
     def _repr_svg_(self):
-        return SVG(self).svg()
+        frame = Frame(self, padding=0.01)
+        return SVG(frame).svg()
 
     def props(self, ctx):
         return self.attr
@@ -261,10 +286,15 @@ class SVG(Container):
         base = dict(width=w, height=h, xmlns=ns_svg)
         return {**base, **self.attr}
 
-    def svg(self):
+    def svg(self, style={}):
         rect0 = (0, 0) + self.size
         ctx = Context(rect=rect0)
-        return Element.svg(self, ctx)
+
+        props = dict_repr(self.props(ctx))
+        pre = ' ' if len(props) > 0 else ''
+        inner = self.inner(ctx)
+
+        return f'<{self.tag}{pre}{props}>\n{style}\n{inner}\n</{self.tag}>'
 
     def save(self, path):
         s = self.svg()
@@ -299,12 +329,18 @@ class Frame(Container):
         super().__init__(children=children, aspect=aspect, **attr)
 
 class Point(Container):
-    def __init__(self, child, r=0.5, x=0.5, y=0.5, xy=None, aspect=None, **attr):
-        if xy is not None:
-            x, y = xy
+    def __init__(self, child, x=0.5, y=0.5, r=0.5, aspect=None, **attr):
+        if type(r) is not tuple:
+            rx, ry = r, r
+        else:
+            rx, ry = r
         aspect = child.aspect if aspect is None else aspect
-        children = [(child, (x-r, y-r, x+r, y+r))]
+        children = [(child, (x-rx, y-ry, x+rx, y+ry))]
         super().__init__(children=children, aspect=aspect, **attr)
+
+# TODO
+class Scatter(Container):
+    pass
 
 class VStack(Container):
     def __init__(self, children, expand=True, aspect=None, **attr):
@@ -312,11 +348,10 @@ class VStack(Container):
         children, heights = zip(*dedict(children, 1/n))
         aspects = np.array([(c.aspect if c.aspect is not None else n) for c in children])
 
+        heights = np.array(heights)
         if expand:
-            heights = np.array(heights)/aspects
-            heights /= np.sum(heights)
-        else:
-            heights = np.array(heights)
+            heights /= aspects
+        heights /= np.sum(heights)
 
         cheights = np.r_[0, np.cumsum(heights)]
         children = [
@@ -327,6 +362,31 @@ class VStack(Container):
         aspect = aspect0 if aspect is None else aspect
 
         super().__init__(children=children, aspect=aspect, **attr)
+
+class HStack(Container):
+    def __init__(self, children, expand=True, aspect=None, **attr):
+        n = len(children)
+        children, widths = zip(*dedict(children, 1/n))
+        aspects = np.array([(c.aspect if c.aspect is not None else n) for c in children])
+
+        widths = np.array(widths)
+        if expand:
+            widths *= aspects
+        widths /= np.sum(widths)
+
+        cwidths = np.r_[0, np.cumsum(widths)]
+        children = [
+            (c, (fw0, 0, fw1, 1)) for c, fw0, fw1 in zip(children, cwidths[:-1], cwidths[1:])
+        ]
+
+        aspect0 = 1/np.max(widths/aspects)
+        aspect = aspect0 if aspect is None else aspect
+
+        super().__init__(children=children, aspect=aspect, **attr)
+
+# TODO
+class Grid:
+    pass
 
 ##
 ## geometric
@@ -406,7 +466,7 @@ class Bullet(Circle):
 ##
 
 class Text(Element):
-    def __init__(self, text='', font_family='monospace', **attr):
+    def __init__(self, text='', font_family=default_font_family, **attr):
         self.text_width, self.text_height = fonts.get_text_size(text, font=font_family)
         self.text = text
 
@@ -426,7 +486,7 @@ class Text(Element):
         return self.text
 
 class TextDebug(Container):
-    def __init__(self, text='', font_family='monospace', **attr):
+    def __init__(self, text='', font_family=default_font_family, **attr):
         label = Text(text=text, font_family=font_family, **attr)
         boxes = Rect(stroke='red')
         outer = Rect(stroke='blue', stroke_dasharray='5 5')
@@ -457,17 +517,12 @@ class TextDebug(Container):
 
         super().__init__(tag='g', children=children, aspect=label.aspect, **attr)
 
-shape_classes = {
-    'ellipse': Ellipse,
-    'rect': Rect,
-}
-
 class Node(Container):
-    def __init__(self, text=None, pad=0.15, shape='ellipse', text_args={}, shape_args={}, **attr):
-        ShapeClass = shape_classes.get(shape, shape)
+    def __init__(self, text=None, pad=0.15, shape=Rect, text_args={}, shape_args={}, **attr):
+        attr, text_args, shape_args = dispatch(attr, ['text', 'shape'])
 
         label = Text(text=text, **text_args)
-        outer = ShapeClass(**shape_args)
+        outer = shape(**shape_args)
 
         aspect0 = label.aspect
         aspect1 = aspect0*(1+2*pad/aspect0)/(1+2*pad)
@@ -552,6 +607,9 @@ class HTick(Container):
     def __init__(self, text, thick=1, pad=0.5, text_scale=1, debug=False, **attr):
         attr, text_args = dispatch(attr, ['text'])
 
+        if 'font_weight' not in text_args:
+            text_args['font_weight'] = 200
+
         line = Line(0, 0.5, 1, 0.5, stroke_width=thick)
 
         if text is None or (type(text) is str and len(text) == 0):
@@ -583,6 +641,9 @@ class VTick(Container):
     def __init__(self, text, thick=1, pad=0.5, text_scale=1, debug=False, **attr):
         attr, text_args = dispatch(attr, ['text'])
 
+        if 'font_weight' not in text_args:
+            text_args['font_weight'] = 200
+
         line = Line(0.5, 0, 0.5, 1, stroke_width=thick)
 
         if text is None or (type(text) is str and len(text) == 0):
@@ -611,7 +672,7 @@ class VTick(Container):
         self.height = height
 
 class VScale(Container):
-    def __init__(self, ticks, tick_size=tick_size_base, tick_args={}, **attr):
+    def __init__(self, ticks, tick_size=default_tick_size, tick_args={}, **attr):
         if type(ticks) is dict:
             ticks = [(k, v) for k, v in ticks.items()]
 
@@ -635,7 +696,7 @@ class VScale(Container):
         self.anchor = anchor
 
 class HScale(Container):
-    def __init__(self, ticks, tick_size=tick_size_base, tick_args={}, **attr):
+    def __init__(self, ticks, tick_size=default_tick_size, tick_args={}, **attr):
         if type(ticks) is dict:
             ticks = [(k, v) for k, v in ticks.items()]
 
@@ -659,7 +720,7 @@ class HScale(Container):
         self.anchor = anchor
 
 class VAxis(Container):
-    def __init__(self, ticks, tick_size=tick_size_base, **attr):
+    def __init__(self, ticks, tick_size=default_tick_size, **attr):
         attr, tick_args = dispatch(attr, ['tick'])
         scale = VScale(ticks, tick_size=tick_size, tick_args=tick_args)
         line = Line(scale.anchor, 0, scale.anchor, 1)
@@ -667,7 +728,7 @@ class VAxis(Container):
         self.anchor = scale.anchor
 
 class HAxis(Container):
-    def __init__(self, ticks, tick_size=tick_size_base, **attr):
+    def __init__(self, ticks, tick_size=default_tick_size, **attr):
         attr, tick_args = dispatch(attr, ['tick'])
         scale = HScale(ticks, tick_size=tick_size, tick_args=tick_args)
         line = Line(0, scale.anchor, 1, scale.anchor)
@@ -680,8 +741,8 @@ class Axes(Container):
 
         # adjust tick_size for aspect
         if aspect is not None:
-            xtick_size = xaxis_args.get('tick_size', tick_size_base)
-            ytick_size = yaxis_args.get('tick_size', tick_size_base)
+            xtick_size = xaxis_args.get('tick_size', default_tick_size)
+            ytick_size = yaxis_args.get('tick_size', default_tick_size)
             xaxis_args['tick_size'] = xtick_size/sqrt(aspect)
             yaxis_args['tick_size'] = ytick_size*sqrt(aspect)
 
@@ -736,17 +797,13 @@ class Axes(Container):
         super().__init__(children=children, aspect=aspect, **attr)
         self.anchor = cx, cy
 
-class Plot(Element):
-    def __init__(self, lines=None, xaxis=0, yaxis=0, padding=0.05, **attr):
-        super().__init__(tag='g', **attr)
-
-        if xaxis is not None and not isinstance(xaxis, Element):
-            xaxis = Axis('x', xaxis)
-        if yaxis is not None and not isinstance(yaxis, Element):
-            yaxis = Axis('y', yaxis)
-
+# TODO: refurbish this
+class Plot(Container):
+    def __init__(self, lines=None, xlim=None, ylim=None, **attr):
+        self.axes = Axes()
         self.lines = lines if lines is not None else []
-        self.axes = [xaxis, yaxis]
+
+        super().__init__(**attr)
         self.padding = padding
 
     def inner(self, ctx):
