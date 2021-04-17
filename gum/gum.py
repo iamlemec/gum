@@ -8,7 +8,7 @@ import numpy as np
 from collections import defaultdict
 from math import sqrt
 
-import fonts
+from .fonts import get_text_size, get_text_shape
 
 ##
 ## defaults
@@ -75,27 +75,12 @@ def dispatch(d, keys):
 def prefix(d, pre):
     return {f'{pre}_{k}': v for k, v in d.items()}
 
-def display(x, **kwargs):
-    if type(x) is not SVG:
-        x = SVG([x], **kwargs)
-    return x.svg()
-
 def dedict(d, default=None):
     if type(d) is dict:
         d = [(k, v) for k, v in d.items()]
     return [
         (x if type(x) is tuple else (x, default)) for x in d
     ]
-
-##
-## math tools
-##
-
-def cumsum(a):
-    tot = 0
-    for x in a:
-        tot += x
-        yield tot
 
 ##
 ## rect tools
@@ -476,7 +461,7 @@ class Bullet(Circle):
 
 class Text(Element):
     def __init__(self, text='', font_family=default_font_family, **attr):
-        self.text_width, self.text_height = fonts.get_text_size(text, font=font_family)
+        self.text_width, self.text_height = get_text_size(text, font=font_family)
         self.text = text
 
         base_aspect = self.text_width/self.text_height
@@ -505,7 +490,7 @@ class TextDebug(Container):
         self.text_height = label.text_height
 
         # get full font shaping info
-        cluster, shapes, deltas, offsets = fonts.get_text_shape(text, font=font_family)
+        cluster, shapes, deltas, offsets = get_text_shape(text, font=font_family)
         shapes = [(w, h) for w, h in shapes]
         deltas = [(w, -h) for w, h in deltas]
 
