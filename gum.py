@@ -33,8 +33,18 @@ default_font_family = 'Montserrat'
 def demangle(k):
     return k.replace('_', '-')
 
-def dict_repr(d):
-    return ' '.join([f'{demangle(k)}="{v}"' for k, v in d.items()])
+def rounder(x, prec=13):
+    if type(x) is float:
+        xr = round(x, ndigits=prec)
+        if (xr % 1) == 0:
+            return int(xr)
+        else:
+            return x
+    else:
+        return x
+
+def props_repr(d):
+    return ' '.join([f'{demangle(k)}="{rounder(v)}"' for k, v in d.items()])
 
 def value_repr(x):
     if type(x) is str:
@@ -199,7 +209,7 @@ class Element:
         self.attr = attr
 
     def __repr__(self):
-        attr = dict_repr(self.attr)
+        attr = props_repr(self.attr)
         return f'{self.tag}: {attr}'
 
     def __add__(self, other):
@@ -225,7 +235,7 @@ class Element:
         if ctx is None:
             ctx = Context()
 
-        props = dict_repr(self.props(ctx))
+        props = props_repr(self.props(ctx))
         pre = ' ' if len(props) > 0 else ''
 
         if self.unary:
@@ -286,15 +296,10 @@ class SVG(Container):
         base = dict(width=w, height=h, xmlns=ns_svg)
         return {**base, **self.attr}
 
-    def svg(self, style={}):
+    def svg(self):
         rect0 = (0, 0) + self.size
         ctx = Context(rect=rect0)
-
-        props = dict_repr(self.props(ctx))
-        pre = ' ' if len(props) > 0 else ''
-        inner = self.inner(ctx)
-
-        return f'<{self.tag}{pre}{props}>\n{style}\n{inner}\n</{self.tag}>'
+        return Element.svg(self, ctx=ctx)
 
     def save(self, path):
         s = self.svg()
@@ -304,6 +309,10 @@ class SVG(Container):
 ##
 ## layouts
 ##
+
+class Box(Container):
+    def __init__(self, children, **attr):
+        super().__init__(children=children, tag='g', **attr)
 
 class Frame(Container):
     def __init__(self, child, padding=0, margin=0, border=None, aspect=None, **attr):

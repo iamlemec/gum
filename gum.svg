@@ -1,14 +1,11 @@
-<svg width="250" height="110" xmlns="http://www.w3.org/2000/svg">
-{}
-
+<svg width="250" height="100" xmlns="http://www.w3.org/2000/svg">
 <g>
 <g>
-<text x="25.0" y="85.12396694214877" font-size="82.64462809917354px" stroke="black" font-family="Montserrat">gum</text>
-<rect x="25.0" y="24.876033057851252" width="56.69421487603307" height="60.24793388429752" fill="none" stroke="red" />
-<rect x="81.69421487603307" y="41.23966942148762" width="55.61983471074379" height="43.88429752066115" fill="none" stroke="red" />
-<rect x="137.31404958677686" y="41.32231404958679" width="87.68595041322314" height="43.80165289256198" fill="none" stroke="red" />
-<rect x="25.0" y="24.876033057851252" width="200.0" height="60.24793388429752" fill="none" stroke="blue" stroke-dasharray="5 5" />
+<text x="25.411522633744866" y="80" font-size="82.3045267489712px" stroke="black" font-family="Montserrat">gum</text>
+<rect x="25.411522633744852" y="20" width="56.46090534979426" height="60" fill="none" stroke="red" />
+<rect x="81.87242798353911" y="36.29629629629629" width="55.390946502057616" height="43.70370370370371" fill="none" stroke="red" />
+<rect x="137.26337448559673" y="36.37860082304526" width="87.32510288065845" height="43.62139917695474" fill="none" stroke="red" />
+<rect x="25.411522633744852" y="20" width="199.17695473251032" height="60" fill="none" stroke="blue" stroke-dasharray="5 5" />
 </g>
 </g>
-
 </svg>
