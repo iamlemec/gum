@@ -6,7 +6,7 @@ import os
 import copy
 import numpy as np
 from collections import defaultdict
-from math import sqrt
+from math import sqrt, tan, pi, inf, isinf
 
 from .fonts import get_text_size, get_text_shape
 
@@ -24,6 +24,7 @@ frac_base = (0, 0, 1, 1)
 
 # specific elements
 default_tick_size = 0.05
+default_nticks = 5
 default_font_family = 'Montserrat'
 default_emoji_font = 'NotoColorEmoji'
 
@@ -255,6 +256,14 @@ class Container(Element):
         inside = '\n'.join([c.svg(ctx(r, c.aspect)) for c, r in self.children])
         return f'\n{inside}\n'
 
+# this can have an aspect, which is utilized by layouts
+class Spacer(Element):
+    def __init__(self, aspect=None, **attr):
+        super().__init__(tag=None, aspect=aspect, **attr)
+
+    def svg(self, ctx=None):
+        return ''
+
 class SVG(Container):
     def __init__(self, children=None, size=size_base, clip=True, **attr):
         if children is not None and not isinstance(children, (list, dict)):
@@ -270,7 +279,10 @@ class SVG(Container):
             aspect = 1
 
         if type(size) is not tuple:
-            size = size*sqrt(aspect), size/sqrt(aspect)
+            if aspect >= 1:
+                size = size, size/aspect
+            else:
+                size = size*aspect, size
 
         self.size = size
 
@@ -298,16 +310,10 @@ class SVG(Container):
 
 class Box(Container):
     def __init__(self, children, **attr):
-        super().__init__(children=children, tag='g', **attr)
+        super().__init__(children=children, **attr)
 
 class Frame(Container):
     def __init__(self, child, padding=0, margin=0, border=None, aspect=None, **attr):
-        if child.aspect is not None:
-            if type(padding) is not tuple:
-                padding = padding/child.aspect, padding
-            if type(margin) is not tuple:
-                margin = margin/child.aspect, margin
-
         mrect = pad_rect(margin)
         prect = pad_rect(padding)
         trect = pad_rect(padding, base=mrect)
@@ -393,26 +399,66 @@ class Grid:
 ## geometric
 ##
 
-# should this be atomic? or just an angle?
-class Line(Element):
-    def __init__(self, x1=0, y1=0, x2=1, y2=1, **attr):
-        super().__init__(tag='line', unary=True, **attr)
-        self.x1 = x1
-        self.y1 = y1
-        self.x2 = x2
-        self.y2 = y2
+class Ray(Element):
+    def __init__(self, theta=-45, **attr):
+        if theta == -90:
+            theta = 90
+        elif theta < -90 or theta > 90:
+            theta = ((theta + 90) % 180) - 90
+        direc0 = tan(theta*(pi/180))
+
+        if theta == 90:
+            direc = inf
+            aspect = None
+        elif theta == 0:
+            direc = 0
+            aspect = None
+        else:
+            direc = direc0
+            aspect = 1/abs(direc0)
+
+        super().__init__(tag='line', aspect=aspect, unary=True, **attr)
+        self.direc = direc
+
+    def props(self, ctx):
+        x1, y1, x2, y2 = ctx.rect
+        w, h = x2 - x1, y2 - y1
+        if isinf(self.direc):
+            x1 = x2 = x1 + 0.5*w
+        elif self.direc == 0:
+            y1 = y2 = y1 + 0.5*h
+        elif self.direc > 0:
+            y1, y2 = y2, y1
+        base = dict(x1=x1, y1=y1, x2=x2, y2=y2, stroke='black')
+        return base | self.attr
+
+class VLine(Element):
+    def __init__(self, pos=0.5, aspect=None, **attr):
+        super().__init__(tag='line', unary=True, aspect=aspect, **attr)
+        self.pos = pos
 
     def props(self, ctx):
         x1, y1, x2, y2 = ctx.rect
         w, h = x2 - x1, y2 - y1
 
-        x1p = x1 + w*self.x1
-        y1p = y1 + h*self.y1
-        x2p = x1 + w*self.x2
-        y2p = y1 + h*self.y2
+        x1 = x2 = x1 + self.pos*w
 
-        base = dict(x1=x1p, y1=y1p, x2=x2p, y2=y2p, stroke='black')
-        return {**base, **self.attr}
+        base = dict(x1=x1, y1=y1, x2=x2, y2=y2, stroke='black')
+        return base | self.attr
+
+class HLine(Element):
+    def __init__(self, pos=0.5, aspect=None, **attr):
+        super().__init__(tag='line', unary=True, aspect=aspect, **attr)
+        self.pos = pos
+
+    def props(self, ctx):
+        x1, y1, x2, y2 = ctx.rect
+        w, h = x2 - x1, y2 - y1
+
+        y1 = y2 = y1 + self.pos*h
+
+        base = dict(x1=x1, y1=y1, x2=x2, y2=y2, stroke='black')
+        return base | self.attr
 
 class Rect(Element):
     def __init__(self, **attr):
@@ -627,7 +673,7 @@ class SymPath(Element):
 
         points = ' '.join([f'{x},{y}' for x, y in zip(xcoord, ycoord)])
         base = dict(points=points, fill='none', stroke='black')
-        return {**base, **self.attr}
+        return base | self.attr
 
 ##
 ## axes
@@ -640,7 +686,7 @@ class HTick(Container):
         if 'font_weight' not in text_args:
             text_args['font_weight'] = 200
 
-        line = Line(0, 0.5, 1, 0.5, stroke_width=thick)
+        line = HLine(stroke_width=thick)
 
         if text is None or (type(text) is str and len(text) == 0):
             aspect = 1
@@ -674,7 +720,7 @@ class VTick(Container):
         if 'font_weight' not in text_args:
             text_args['font_weight'] = 200
 
-        line = Line(0.5, 0, 0.5, 1, stroke_width=thick)
+        line = VLine(stroke_width=thick)
 
         if text is None or (type(text) is str and len(text) == 0):
             aspect = 1
@@ -753,7 +799,7 @@ class VAxis(Container):
     def __init__(self, ticks, tick_size=default_tick_size, **attr):
         attr, tick_args = dispatch(attr, ['tick'])
         scale = VScale(ticks, tick_size=tick_size, tick_args=tick_args)
-        line = Line(scale.anchor, 0, scale.anchor, 1)
+        line = VLine(scale.anchor)
         super().__init__(children=[scale, line], aspect=scale.aspect, **attr)
         self.anchor = scale.anchor
 
@@ -761,7 +807,7 @@ class HAxis(Container):
     def __init__(self, ticks, tick_size=default_tick_size, **attr):
         attr, tick_args = dispatch(attr, ['tick'])
         scale = HScale(ticks, tick_size=tick_size, tick_args=tick_args)
-        line = Line(0, scale.anchor, 1, scale.anchor)
+        line = HLine(scale.anchor)
         super().__init__(children=[scale, line], aspect=scale.aspect, **attr)
         self.anchor = scale.anchor
 
@@ -829,34 +875,38 @@ class Axes(Container):
 
 # TODO: refurbish this
 class Plot(Container):
-    def __init__(self, lines=None, xlim=None, ylim=None, **attr):
-        self.axes = Axes()
-        self.lines = lines if lines is not None else []
+    def __init__(self, lines=None, xlim=None, ylim=None, xticks=None, yticks=None, aspect=None, **attr):
+        attr, xaxis_args, yaxis_args = dispatch(attr, ['xaxis', 'yaxis'])
 
-        super().__init__(**attr)
-        self.padding = padding
-
-    def inner(self, ctx):
-        xmins, xmaxs = zip(*[c.xlim for c in self.lines])
-        ymins, ymaxs = zip(*[c.ylim for c in self.lines])
+        # determine coordinate limits
+        xmins, xmaxs = zip(*[c.xlim for c in lines])
+        ymins, ymaxs = zip(*[c.ylim for c in lines])
         xmin, xmax = min(xmins), max(xmaxs)
         ymin, ymax = min(ymins), max(ymaxs)
         xrange = xmax - xmin
         yrange = ymax - ymin
+        xmap = lambda x: (x-xmin)/xrange
+        ymap = lambda y: (y-ymin)/yrange
 
-        x1s = [(x-xmin)/xrange if xrange != 0 else 0.5 for x in xmins]
-        y1s = [(ymax-y)/yrange if yrange != 0 else 0.5 for y in ymaxs]
-        x2s = [(x-xmin)/xrange if xrange != 0 else 0.5 for x in xmaxs]
-        y2s = [(ymax-y)/yrange if yrange != 0 else 0.5 for y in ymins]
-        rects = [r for r in zip(x1s, y1s, x2s, y2s)]
+        # construct ticks
+        if xticks is None or type(xticks) is int:
+            nxticks = xticks if xticks is not None else default_nticks
+            xticks = {xmap(x): str(f'{x:.2f}') for x in np.linspace(xmin, xmax, nxticks)}
+        else:
+            xticks = {xmap(x): t for x, t in xticks.items()}
+        if yticks is None or type(yticks) is int:
+            nyticks = yticks if yticks is not None else default_nticks
+            yticks = {ymap(y): str(f'{y:.2f}') for y in np.linspace(ymin, ymax, nyticks)}
+        else:
+            yticks = {ymap(y): t for y, t in yticks.items()}
 
-        rpad = (self.padding, self.padding, 1 - self.padding, 1 - self.padding)
-        ctx1 = ctx(rpad)
+        # create axes
+        axis_args = prefix(xaxis_args, 'xaxis') | prefix(yaxis_args, 'yaxis')
+        axes = Axes(xticks=xticks, yticks=yticks, aspect=aspect, **axis_args)
+        ax, ay = axes.anchor
+        children = {
+            line: (ax, 0, 1, ay) for line in lines
+        }
+        children[axes] = None
 
-        xpad, ypad = self.padding*xrange, self.padding*yrange
-        ctx2 = ctx.clone(xmin=xmin-xpad, xmax=xmax+xpad, ymin=ymin-ypad, ymax=ymax+ypad)
-
-        lines = '\n'.join([c.svg(ctx1(r)) for c, r in zip(self.lines, rects)])
-        axes = '\n'.join([a.svg(ctx2(frac_base)) for a in self.axes])
-
-        return lines + '\n' + axes
+        super().__init__(children=children, aspect=axes.aspect, **attr)
