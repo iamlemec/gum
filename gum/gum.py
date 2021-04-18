@@ -18,13 +18,14 @@ from .fonts import get_text_size, get_text_shape
 ns_svg = 'http://www.w3.org/2000/svg'
 
 # sizing
-size_base = 200
+size_base = 250
 rect_base = (0, 0, 100, 100)
 frac_base = (0, 0, 1, 1)
 
 # specific elements
 default_tick_size = 0.05
 default_font_family = 'Montserrat'
+default_emoji_font = 'NotoColorEmoji'
 
 ##
 ## basic tools
@@ -301,6 +302,12 @@ class Box(Container):
 
 class Frame(Container):
     def __init__(self, child, padding=0, margin=0, border=None, aspect=None, **attr):
+        if child.aspect is not None:
+            if type(padding) is not tuple:
+                padding = padding/child.aspect, padding
+            if type(margin) is not tuple:
+                margin = margin/child.aspect, margin
+
         mrect = pad_rect(margin)
         prect = pad_rect(padding)
         trect = pad_rect(padding, base=mrect)
@@ -479,6 +486,29 @@ class Text(Element):
     def inner(self, ctx):
         return self.text
 
+class Emoji(Element):
+    def __init__(self, text='', font_family=default_emoji_font, **attr):
+        self.text_width, self.text_height = get_text_size(text, font=font_family)
+        self.text = text
+
+        base_aspect = self.text_width/self.text_height
+        super().__init__(tag='text', aspect=base_aspect, font_family=font_family, **attr)
+
+    def props(self, ctx):
+        x1, y1, x2, y2 = ctx.rect
+        w, h = x2 - x1, y2 - y1
+        fs = h/self.text_height
+
+        # magic offsets
+        x0, y0 = x1, y2 - 0.125*h
+        fs0 = 1.25*fs
+
+        base = dict(x=x0, y=y0, font_size=f'{fs0}px', stroke='black')
+        return {**base, **self.attr}
+
+    def inner(self, ctx):
+        return self.text
+
 class TextDebug(Container):
     def __init__(self, text='', font_family=default_font_family, **attr):
         label = Text(text=text, font_family=font_family, **attr)
@@ -509,20 +539,26 @@ class TextDebug(Container):
         children += [(boxes, tuple(frac)) for frac in crects]
         children += [outer]
 
-        super().__init__(tag='g', children=children, aspect=label.aspect, **attr)
+        super().__init__(children=children, aspect=label.aspect, **attr)
 
 class Node(Container):
-    def __init__(self, text=None, pad=0.15, shape=Rect, text_args={}, shape_args={}, **attr):
+    def __init__(self, text, pad=0.2, shape=Rect, debug=False, **attr):
         attr, text_args, shape_args = dispatch(attr, ['text', 'shape'])
 
-        label = Text(text=text, **text_args)
+        # generate core elements
+        if type(text) is str:
+            TextClass = TextDebug if debug else Text
+            text = TextClass(text=text, **text_args)
         outer = shape(**shape_args)
 
-        aspect0 = label.aspect
-        aspect1 = aspect0*(1+2*pad/aspect0)/(1+2*pad)
+        # auto-scale single number padding
+        aspect0 = text.aspect
+        if type(pad) is not tuple:
+            pad = pad/aspect0, pad
+        aspect1 = (aspect0+2*pad[0])/(1+2*pad[1])
 
         children = {
-            label: pad_rect(pad),
+            text: pad_rect(pad),
             outer: None
         }
 

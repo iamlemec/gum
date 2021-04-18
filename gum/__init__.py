@@ -6,6 +6,6 @@ from .gum import (
     Box, Frame, Point, Scatter, VStack, HStack, Grid,
     Line, Rect, Square, Ellipse, Circle, Bullet,
     SymPath,
-    Text, TextDebug, Node,
+    Text, Emoji, TextDebug, Node,
     HTick, VTick, VScale, HScale, VAxis, HAxis, Axes
 )
