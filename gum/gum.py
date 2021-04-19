@@ -129,8 +129,8 @@ def rect_aspect(rect):
 ## context
 ##
 
-# rect0 — pixel rect
-# rect1 — fraction rect
+# prect — outer rect (absolute)
+# frect — inner rect (fraction)
 def map_coords(prect, frect=frac_base, aspect=None):
     pxa, pya, pxb, pyb = prect
     fxa, fya, fxb, fyb = frect
@@ -176,7 +176,8 @@ class Context:
         return ctx
 
     def clone(self, **kwargs):
-        return Context(**{**self.__dict__, **kwargs})
+        kwargs1 = self.__dict__ | kwargs
+        return Context(**kwargs1)
 
     def copy(self):
         return copy.copy(self)
@@ -249,9 +250,6 @@ class Container(Element):
         children = [(c, pos_rect(r)) for c, r in children]
         self.children = children
 
-    def child(self, i):
-        return self.children[i][0]
-
     def inner(self, ctx):
         inside = '\n'.join([c.svg(ctx(r, c.aspect)) for c, r in self.children])
         return f'\n{inside}\n'
@@ -292,7 +290,7 @@ class SVG(Container):
     def props(self, ctx):
         w, h = self.size
         base = dict(width=w, height=h, xmlns=ns_svg)
-        return {**base, **self.attr}
+        return base | self.attr
 
     def svg(self):
         rect0 = (0, 0) + self.size
@@ -417,7 +415,8 @@ class Ray(Element):
             direc = direc0
             aspect = 1/abs(direc0)
 
-        super().__init__(tag='line', aspect=aspect, unary=True, **attr)
+        attr1 = dict(stroke='black') | attr
+        super().__init__(tag='line', aspect=aspect, unary=True, **attr1)
         self.direc = direc
 
     def props(self, ctx):
@@ -429,12 +428,13 @@ class Ray(Element):
             y1 = y2 = y1 + 0.5*h
         elif self.direc > 0:
             y1, y2 = y2, y1
-        base = dict(x1=x1, y1=y1, x2=x2, y2=y2, stroke='black')
+        base = dict(x1=x1, y1=y1, x2=x2, y2=y2)
         return base | self.attr
 
 class VLine(Element):
     def __init__(self, pos=0.5, aspect=None, **attr):
-        super().__init__(tag='line', unary=True, aspect=aspect, **attr)
+        attr1 = dict(stroke='black') | attr
+        super().__init__(tag='line', unary=True, aspect=aspect, **attr1)
         self.pos = pos
 
     def props(self, ctx):
@@ -443,12 +443,13 @@ class VLine(Element):
 
         x1 = x2 = x1 + self.pos*w
 
-        base = dict(x1=x1, y1=y1, x2=x2, y2=y2, stroke='black')
+        base = dict(x1=x1, y1=y1, x2=x2, y2=y2)
         return base | self.attr
 
 class HLine(Element):
     def __init__(self, pos=0.5, aspect=None, **attr):
-        super().__init__(tag='line', unary=True, aspect=aspect, **attr)
+        attr1 = dict(stroke='black') | attr
+        super().__init__(tag='line', unary=True, aspect=aspect, **attr1)
         self.pos = pos
 
     def props(self, ctx):
@@ -457,13 +458,12 @@ class HLine(Element):
 
         y1 = y2 = y1 + self.pos*h
 
-        base = dict(x1=x1, y1=y1, x2=x2, y2=y2, stroke='black')
+        base = dict(x1=x1, y1=y1, x2=x2, y2=y2)
         return base | self.attr
 
 class Rect(Element):
     def __init__(self, **attr):
-        base = dict(fill='none', stroke='black')
-        attr1 = {**base, **attr}
+        attr1 = dict(fill='none', stroke='black') | attr
         super().__init__(tag='rect', unary=True, **attr1)
 
     def props(self, ctx):
@@ -474,7 +474,7 @@ class Rect(Element):
         w, h = w0, h0
 
         base = dict(x=x, y=y, width=w, height=h)
-        return {**base, **self.attr}
+        return base | self.attr
 
 class Square(Rect):
     def __init__(self, **attr):
@@ -482,8 +482,7 @@ class Square(Rect):
 
 class Ellipse(Element):
     def __init__(self, **attr):
-        base = dict(fill='none', stroke='black')
-        attr1 = base | attr
+        attr1 = dict(fill='none', stroke='black') | attr
         super().__init__(tag='ellipse', unary=True, **attr1)
 
     def props(self, ctx):
@@ -496,7 +495,7 @@ class Ellipse(Element):
         ry = 0.5*h
 
         base = dict(cx=cx, cy=cy, rx=rx, ry=ry)
-        return {**base, **self.attr}
+        return base | self.attr
 
 class Circle(Ellipse):
     def __init__(self, **attr):
@@ -504,8 +503,7 @@ class Circle(Ellipse):
 
 class Bullet(Circle):
     def __init__(self, **attr):
-        base = dict(fill='black')
-        attr1 = base | attr
+        attr1 = dict(fill='black') | attr
         super().__init__(**attr1)
 
 ##
@@ -527,7 +525,7 @@ class Text(Element):
         fs = h/self.text_height
 
         base = dict(x=x1, y=y2, font_size=f'{fs}px', stroke='black')
-        return {**base, **self.attr}
+        return base | self.attr
 
     def inner(self, ctx):
         return self.text
@@ -550,7 +548,7 @@ class Emoji(Element):
         fs0 = 1.25*fs
 
         base = dict(x=x0, y=y0, font_size=f'{fs0}px', stroke='black')
-        return {**base, **self.attr}
+        return base | self.attr
 
     def inner(self, ctx):
         return self.text
@@ -878,34 +876,56 @@ class Plot(Container):
     def __init__(self, lines=None, xlim=None, ylim=None, xticks=None, yticks=None, aspect=None, **attr):
         attr, xaxis_args, yaxis_args = dispatch(attr, ['xaxis', 'yaxis'])
 
-        # determine coordinate limits
+        # collect line ranges
         xmins, xmaxs = zip(*[c.xlim for c in lines])
         ymins, ymaxs = zip(*[c.ylim for c in lines])
-        xmin, xmax = min(xmins), max(xmaxs)
-        ymin, ymax = min(ymins), max(ymaxs)
-        xrange = xmax - xmin
-        yrange = ymax - ymin
-        xmap = lambda x: (x-xmin)/xrange
-        ymap = lambda y: (y-ymin)/yrange
 
-        # construct ticks
-        if xticks is None or type(xticks) is int:
-            nxticks = xticks if xticks is not None else default_nticks
-            xticks = {xmap(x): str(f'{x:.2f}') for x in np.linspace(xmin, xmax, nxticks)}
+        # determine coordinate limits
+        if xlim is None:
+            xmin, xmax = min(xmins), max(xmaxs)
         else:
+            xmin, xmax = xlim
+        if ylim is None:
+            ymin, ymax = min(ymins), max(ymaxs)
+        else:
+            ymin, ymax = ylim
+
+        # x/y coordinate functions
+        xmap = lambda x: (x-xmin)/(xmax-xmin)
+        ymap = lambda y: (y-ymin)/(ymax-ymin)
+
+        # map lines into coordinates
+        coords = [
+            (xmap(x1), 1-ymap(y2), xmap(x2), 1-ymap(y1))
+            for x1, x2, y1, y2 in zip(xmins, xmaxs, ymins, ymaxs)
+        ]
+
+        # construct/map ticks if needed
+        if xticks is None or type(xticks) is int:
+            xtick_num = xticks if xticks is not None else default_nticks
+            xtick_vals = np.linspace(xmin, xmax, xtick_num)
+            xticks = {xmap(x): str(f'{x:.2f}') for x in xtick_vals}
+        else:
+            if type(xticks) is list:
+                xticks = {x: str(x) for x in xticks}
             xticks = {xmap(x): t for x, t in xticks.items()}
         if yticks is None or type(yticks) is int:
-            nyticks = yticks if yticks is not None else default_nticks
-            yticks = {ymap(y): str(f'{y:.2f}') for y in np.linspace(ymin, ymax, nyticks)}
+            ytick_num = yticks if yticks is not None else default_nticks
+            ytick_vals = np.linspace(ymin, ymax, ytick_num)
+            yticks = {ymap(y): str(f'{y:.2f}') for y in ytick_vals}
         else:
+            if type(yticks) is list:
+                yticks = {y: str(y) for y in yticks}
             yticks = {ymap(y): t for y, t in yticks.items()}
 
         # create axes
         axis_args = prefix(xaxis_args, 'xaxis') | prefix(yaxis_args, 'yaxis')
         axes = Axes(xticks=xticks, yticks=yticks, aspect=aspect, **axis_args)
-        ax, ay = axes.anchor
+
+        # map lines into plot area
+        lbox = (axes.anchor[0], 0, 1, axes.anchor[1])
         children = {
-            line: (ax, 0, 1, ay) for line in lines
+            ln: map_coords(lbox, cr) for ln, cr in zip(lines, coords)
         }
         children[axes] = None
 
