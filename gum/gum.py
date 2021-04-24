@@ -307,8 +307,8 @@ class SVG(Container):
 ##
 
 class Box(Container):
-    def __init__(self, children, **attr):
-        super().__init__(children=children, **attr)
+    def __init__(self, children, aspect=None, **attr):
+        super().__init__(children=children, aspect=aspect, **attr)
 
 class Frame(Container):
     def __init__(self, child, padding=0, margin=0, border=None, aspect=None, **attr):
@@ -316,16 +316,19 @@ class Frame(Container):
         prect = pad_rect(padding)
         trect = pad_rect(padding, base=mrect)
 
-        children = [(child, trect)]
+        children = []
+
         if border is not None:
             attr, rect_args = dispatch(attr, ['rect'])
-            if child.aspect is not None:
+            if aspect is None and child.aspect is not None:
                 pw, ph = rect_dims(prect)
                 raspect = child.aspect*(ph/pw)
             else:
-                raspect = None
+                raspect = aspect
             rect = Rect(stroke_width=border, aspect=raspect, **rect_args)
             children += [(rect, mrect)]
+
+        children += [(child, trect)]
 
         if aspect is None and child.aspect is not None:
             tw, th = rect_dims(trect)
@@ -356,7 +359,7 @@ class VStack(Container):
         heights = np.array(heights)
         if expand:
             heights /= aspects
-        heights /= np.sum(heights)
+            heights /= np.sum(heights)
 
         cheights = np.r_[0, np.cumsum(heights)]
         children = [
@@ -377,7 +380,7 @@ class HStack(Container):
         widths = np.array(widths)
         if expand:
             widths *= aspects
-        widths /= np.sum(widths)
+            widths /= np.sum(widths)
 
         cwidths = np.r_[0, np.cumsum(widths)]
         children = [
@@ -871,10 +874,13 @@ class Axes(Container):
         super().__init__(children=children, aspect=aspect, **attr)
         self.anchor = cx, cy
 
-# TODO: refurbish this
 class Plot(Container):
-    def __init__(self, lines=None, xlim=None, ylim=None, xticks=None, yticks=None, aspect=None, **attr):
+    def __init__(self, lines, xlim=None, ylim=None, xticks=None, yticks=None, aspect=None, **attr):
         attr, xaxis_args, yaxis_args = dispatch(attr, ['xaxis', 'yaxis'])
+
+        # allow singleton lines
+        if type(lines) is not list:
+            lines = [lines]
 
         # collect line ranges
         xmins, xmaxs = zip(*[c.xlim for c in lines])
