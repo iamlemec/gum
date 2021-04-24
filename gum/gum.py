@@ -120,6 +120,21 @@ def pad_rect(p, base=frac_base):
         pxa, pya, pxb, pyb = p
         return (xa+pxa, ya+pya, xb-pxb, yb-pyb)
 
+def rad_rect(p, default=None):
+    if len(p) == 1:
+        r, = p
+        x, y = 0.5, 0.5
+        rx, ry = r, r
+    elif len(p) == 2:
+        x, y = p
+        rx, ry = default, default
+    elif len(p) == 3:
+        x, y, r = p
+        rx, ry = r, r
+    elif len(p) == 4:
+        x, y, rx, ry = p
+    return (x-rx, y-ry, x+rx, y+ry)
+
 def merge_rects(rects):
     xa, ya, xb, yb = zip(*rects)
     return min(xa), min(ya), max(xb), max(yb)
@@ -353,16 +368,19 @@ class Frame(Container):
 class Point(Container):
     def __init__(self, child, x=0.5, y=0.5, r=0.5, aspect=None, **attr):
         if type(r) is not tuple:
-            rx, ry = r, r
-        else:
-            rx, ry = r
+            r = r,
+        pos = x, y, *r
         aspect = child.aspect if aspect is None else aspect
-        children = [(child, (x-rx, y-ry, x+rx, y+ry))]
+        children = [(child, rad_rect(pos))]
         super().__init__(children=children, aspect=aspect, **attr)
 
-# TODO
 class Scatter(Container):
-    pass
+    def __init__(self, locs, r=None, **attr):
+        locs = dedict(locs)
+        children = [
+            (child, rad_rect(pos, default=r)) for child, pos in locs
+        ]
+        super().__init__(children=children, **attr)
 
 class VStack(Container):
     def __init__(self, children, expand=True, aspect=None, **attr):
@@ -380,7 +398,8 @@ class VStack(Container):
             (c, (0, fh0, 1, fh1)) for c, fh0, fh1 in zip(children, cheights[:-1], cheights[1:])
         ]
 
-        aspect0 = max([h*a for h, a in zip(heights, aspects) if a is not None])
+        aspects0 = [h*a for h, a in zip(heights, aspects) if a is not None]
+        aspect0 = max(aspects0) if len(aspects0) > 0 else None
         aspect = aspect0 if aspect is None else aspect
 
         super().__init__(children=children, aspect=aspect, **attr)
@@ -401,7 +420,8 @@ class HStack(Container):
             (c, (fw0, 0, fw1, 1)) for c, fw0, fw1 in zip(children, cwidths[:-1], cwidths[1:])
         ]
 
-        aspect0 = 1/max([w/a for w, a in zip(widths, aspects) if a is not None])
+        aspects0 = [a/w for w, a in zip(widths, aspects) if a is not None]
+        aspect0 = min(aspects0) if len(aspects0) > 0 else None
         aspect = aspect0 if aspect is None else aspect
 
         super().__init__(children=children, aspect=aspect, **attr)
