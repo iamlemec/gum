@@ -212,10 +212,16 @@ class Element:
         return Container([self, other])
 
     def __or__(self, other):
-        return HStack([self, other])
+        return HStack([self, other], expand=True)
+
+    def __xor__(self, other):
+        return HStack([self, other], expand=False)
 
     def __and__(self, other):
-        return VStack([self, other])
+        return VStack([self, other], expand=True)
+
+    def __mul__(self, other):
+        return VStack([self, other], expand=False)
 
     def _repr_svg_(self):
         frame = Frame(self, padding=0.01)
@@ -597,7 +603,7 @@ class TextDebug(Container):
         super().__init__(children=children, aspect=label.aspect, **attr)
 
 class Node(Container):
-    def __init__(self, text, pad=0.2, shape=Rect, debug=False, **attr):
+    def __init__(self, text, padding=0.2, shape=Rect, debug=False, **attr):
         attr, text_args, shape_args = dispatch(attr, ['text', 'shape'])
 
         # generate core elements
@@ -608,12 +614,12 @@ class Node(Container):
 
         # auto-scale single number padding
         aspect0 = text.aspect
-        if type(pad) is not tuple:
-            pad = pad/aspect0, pad
-        aspect1 = (aspect0+2*pad[0])/(1+2*pad[1])
+        if type(padding) is not tuple:
+            padding = padding/aspect0, padding
+        aspect1 = (aspect0+2*padding[0])/(1+2*padding[1])
 
         children = {
-            text: pad_rect(pad),
+            text: pad_rect(padding),
             outer: None
         }
 
