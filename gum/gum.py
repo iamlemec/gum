@@ -84,6 +84,14 @@ def dedict(d, default=None):
         (x if type(x) is tuple else (x, default)) for x in d
     ]
 
+def cumsum(a, zero=True):
+    s = 0
+    c = [0] if zero else []
+    for x in a:
+        s += x
+        c.append(s)
+    return c
+
 ##
 ## rect tools
 ##
@@ -354,19 +362,19 @@ class VStack(Container):
     def __init__(self, children, expand=True, aspect=None, **attr):
         n = len(children)
         children, heights = zip(*dedict(children, 1/n))
-        aspects = np.array([(c.aspect if c.aspect is not None else n) for c in children])
+        aspects = [c.aspect for c in children]
 
-        heights = np.array(heights)
         if expand:
-            heights /= aspects
-            heights /= np.sum(heights)
+            heights = [h/(a or 1) for h, a in zip(heights, aspects)]
+            total = sum(heights)
+            heights = [h/total for h in heights]
 
-        cheights = np.r_[0, np.cumsum(heights)]
+        cheights = cumsum(heights)
         children = [
             (c, (0, fh0, 1, fh1)) for c, fh0, fh1 in zip(children, cheights[:-1], cheights[1:])
         ]
 
-        aspect0 = np.max(heights*aspects)
+        aspect0 = max([h*a for h, a in zip(heights, aspects) if a is not None])
         aspect = aspect0 if aspect is None else aspect
 
         super().__init__(children=children, aspect=aspect, **attr)
@@ -375,19 +383,19 @@ class HStack(Container):
     def __init__(self, children, expand=True, aspect=None, **attr):
         n = len(children)
         children, widths = zip(*dedict(children, 1/n))
-        aspects = np.array([(c.aspect if c.aspect is not None else n) for c in children])
+        aspects = [c.aspect for c in children]
 
-        widths = np.array(widths)
         if expand:
-            widths *= aspects
-            widths /= np.sum(widths)
+            widths = [w*(a or 1) for w, a in zip(widths, aspects)]
+            total = sum(widths)
+            widths = [w/total for w in widths]
 
-        cwidths = np.r_[0, np.cumsum(widths)]
+        cwidths = cumsum(widths)
         children = [
             (c, (fw0, 0, fw1, 1)) for c, fw0, fw1 in zip(children, cwidths[:-1], cwidths[1:])
         ]
 
-        aspect0 = 1/np.max(widths/aspects)
+        aspect0 = 1/max([w/a for w, a in zip(widths, aspects) if a is not None])
         aspect = aspect0 if aspect is None else aspect
 
         super().__init__(children=children, aspect=aspect, **attr)
