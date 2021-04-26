@@ -21,6 +21,7 @@ ns_svg = 'http://www.w3.org/2000/svg'
 size_base = 250
 rect_base = (0, 0, 100, 100)
 frac_base = (0, 0, 1, 1)
+prec_base = 13
 
 # specific elements
 default_tick_size = 0.05
@@ -35,18 +36,28 @@ default_emoji_font = 'NotoColorEmoji'
 def demangle(k):
     return k.replace('_', '-')
 
-def rounder(x, prec=13):
-    if type(x) is float:
+def rounder(x, prec=prec_base):
+    if type(x) is str and x.endswith('px'):
+        x1 = x[:-2]
+        if x1.replace('.', '', 1).isnumeric():
+            suf = 'px'
+            x = float(x1)
+    else:
+        suf = ''
+    if isinstance(x, (float, np.floating)):
         xr = round(x, ndigits=prec)
         if (xr % 1) == 0:
-            return int(xr)
+            ret = int(xr)
         else:
-            return x
+            ret = xr
     else:
-        return x
+        ret = x
+    return str(ret) + suf
 
-def props_repr(d):
-    return ' '.join([f'{demangle(k)}="{rounder(v)}"' for k, v in d.items()])
+def props_repr(d, prec=prec_base):
+    return ' '.join([
+        f'{demangle(k)}="{rounder(v, prec=prec)}"' for k, v in d.items()
+    ])
 
 def value_repr(x):
     if type(x) is str:
@@ -184,8 +195,9 @@ def map_coords(prect, frect=frac_base, aspect=None):
     return pxa1, pya1, pxb1, pyb1
 
 class Context:
-    def __init__(self, rect=rect_base, **kwargs):
+    def __init__(self, rect=rect_base, prec=prec_base, **kwargs):
         self.rect = rect
+        self.prec = prec
         for k, v in kwargs.items():
             setattr(self, k, v)
 
@@ -248,11 +260,11 @@ class Element:
     def inner(self, ctx):
         return ''
 
-    def svg(self, ctx=None):
+    def svg(self, ctx=None, prec=prec_base):
         if ctx is None:
-            ctx = Context()
+            ctx = Context(prec=prec)
 
-        props = props_repr(self.props(ctx))
+        props = props_repr(self.props(ctx), prec=ctx.prec)
         pre = ' ' if len(props) > 0 else ''
 
         if self.unary:
@@ -321,9 +333,9 @@ class SVG(Container):
         base = dict(width=w, height=h, xmlns=ns_svg)
         return base | self.attr
 
-    def svg(self):
+    def svg(self, prec=prec_base):
         rect0 = (0, 0) + self.size
-        ctx = Context(rect=rect0)
+        ctx = Context(rect=rect0, prec=prec)
         return Element.svg(self, ctx=ctx)
 
     def save(self, path):
