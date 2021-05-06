@@ -1,5 +1,5 @@
 ################################
-## gen — an svg diagram maker ##
+## gum — an svg diagram maker ##
 ################################
 
 import os
@@ -661,6 +661,21 @@ class Node(Container):
 ## curves
 ##
 
+class Polygon(Element):
+    def __init__(self, points, **attr):
+        self.points = points
+        super().__init__(tag='polygon', unary=True, **attr)
+
+    def props(self, ctx):
+        x1, y1, x2, y2 = ctx.rect
+        w, h = x2 - x1, y2 - y1
+
+        pc = [(x1 + fx*w, y1 + fy*h) for fx, fy in self.points]
+        points = ' '.join([f'{x},{y}' for x, y in pc])
+
+        base = dict(points=points, fill='none', stroke='black')
+        return base | self.attr
+
 class SymPath(Element):
     def __init__(self, fy=None, fx=None, xlim=None, ylim=None, tlim=None, N=100, **attr):
         super().__init__(tag='polyline', unary=True, **attr)
@@ -712,13 +727,13 @@ class SymPath(Element):
         self.ynorm = (ymax-yvals)/yrange if yrange != 0 else 0.5*np.ones_like(yvals)
 
     def props(self, ctx):
-        cx1, cy1, cx2, cy2 = ctx.rect
-        cw, ch = cx2 - cx1, cy2 - cy1
+        x1, y1, x2, y2 = ctx.rect
+        w, h = x2 - x1, y2 - y1
 
-        xcoord = cx1 + self.xnorm*cw
-        ycoord = cy1 + self.ynorm*ch
+        xc = x1 + self.xnorm*w
+        yc = y1 + self.ynorm*h
+        points = ' '.join([f'{x},{y}' for x, y in zip(xc, yc)])
 
-        points = ' '.join([f'{x},{y}' for x, y in zip(xcoord, ycoord)])
         base = dict(points=points, fill='none', stroke='black')
         return base | self.attr
 

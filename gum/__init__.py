@@ -5,7 +5,7 @@ from .gum import (
     Element, Container, Spacer, SVG,
     Box, Frame, Point, Scatter, VStack, HStack, Grid,
     Ray, VLine, HLine, Rect, Square, Ellipse, Circle, Bullet,
-    SymPath,
+    Polygon, SymPath,
     Text, Emoji, TextDebug, Node,
     HTick, VTick, VScale, HScale, VAxis, HAxis, Axes, Plot
 )
