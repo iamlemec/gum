@@ -1,7 +1,7 @@
 <svg width="250" height="100" xmlns="http://www.w3.org/2000/svg">
 <g>
 <g>
-<text x="25.4115226337449" y="80" font-size="82.3045267489712px" stroke="black" font-family="Montserrat">gum</text>
+<text x="25.4115226337449" y="80" font-size="82.3045267489712px" stroke="black" font-family="Montserrat" font-weight="400">gum</text>
 <rect x="25.4115226337449" y="20" width="56.4609053497943" height="60" fill="none" stroke="red" />
 <rect x="81.8724279835391" y="36.2962962962963" width="55.3909465020576" height="43.7037037037037" fill="none" stroke="red" />
 <rect x="137.2633744855967" y="36.3786008230453" width="87.3251028806584" height="43.6213991769547" fill="none" stroke="red" />

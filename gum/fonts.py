@@ -19,10 +19,14 @@ def get_font_path(name=''):
     path, code = font.get(fc.PROP.FILE, 0)
     return path
 
-def get_text_shape(text, font='', path=None, debug=False):
+def get_text_shape(text, font=None, weight=None, path=None, debug=False):
+    if weight is not None:
+        font = f'{font}:{weight}'
     if path is None:
         path = get_font_path(font)
+
     base, ext = os.path.splitext(path)
+    ext = ext[1:]
 
     with open(path, 'rb') as fid:
         fontdata = fid.read()
@@ -36,10 +40,8 @@ def get_text_shape(text, font='', path=None, debug=False):
     hb.font_set_scale(font, upem, upem)
     # hb.font_set_ptem(font, font_size)
 
-    # if ext == '.ttf':
-    #     hb.ft_font_set_funcs(font)
-    # elif ext == '.otf':
-    #     hb.ot_font_set_funcs(font)
+    if ext == 'woff':
+        hb.ft_font_set_funcs(font)
 
     buf = hb.buffer_create()
     hb.buffer_add_utf8(buf, text.encode('utf-8'), 0, -1)

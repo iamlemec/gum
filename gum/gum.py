@@ -28,6 +28,7 @@ default_tick_size = 0.05
 default_nticks = 5
 default_font_family = 'Montserrat'
 default_emoji_font = 'NotoColorEmoji'
+default_font_weight = 'Regular'
 
 ##
 ## basic tools
@@ -559,13 +560,41 @@ class Bullet(Circle):
 ## text
 ##
 
+def weight_map(x):
+    if type(x) is str:
+        if x == 'light':
+            return 'Light', 200
+        elif x == 'Bold':
+            return 'Bold', 700
+        else:
+            return 'Regular', 400
+    elif type(x) is int:
+        if x <= 300:
+            return 'Light', x
+        elif x <= 550:
+            return 'Regular', x
+        else:
+            return 'Bold', x
+    else:
+        return 'Regular', 400
+
 class Text(Element):
-    def __init__(self, text='', font_family=default_font_family, **attr):
-        self.text_width, self.text_height = get_text_size(text, font=font_family)
+    def __init__(
+        self, text='', font_family=default_font_family,
+        font_weight=default_font_weight, **attr
+    ):
+        str_weight, num_weight = weight_map(font_weight)
+
+        self.text_width, self.text_height = get_text_size(
+            text, font=font_family, weight=str_weight
+        )
         self.text = text
 
         base_aspect = self.text_width/self.text_height
-        super().__init__(tag='text', aspect=base_aspect, font_family=font_family, **attr)
+        super().__init__(
+            tag='text', aspect=base_aspect, font_family=font_family,
+            font_weight=num_weight, **attr
+        )
 
     def props(self, ctx):
         x1, y1, x2, y2 = ctx.rect
@@ -746,7 +775,7 @@ class HTick(Container):
         attr, text_args = dispatch(attr, ['text'])
 
         if 'font_weight' not in text_args:
-            text_args['font_weight'] = 200
+            text_args['font_weight'] = 'light'
 
         line = HLine(stroke_width=thick)
 
@@ -780,7 +809,7 @@ class VTick(Container):
         attr, text_args = dispatch(attr, ['text'])
 
         if 'font_weight' not in text_args:
-            text_args['font_weight'] = 200
+            text_args['font_weight'] = 'light'
 
         line = VLine(stroke_width=thick)
 
